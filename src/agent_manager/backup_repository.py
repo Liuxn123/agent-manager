@@ -69,9 +69,13 @@ def _write_json(path: Path, value: dict) -> None:
 
 
 def initialize(repository: Path) -> Path:
-    if any(archives.is_link(path) for path in (repository, *repository.parents)):
+    repository = repository.expanduser()
+    # Resolve system aliases such as macOS /var -> /private/var before
+    # checking files inside the repository. The selected root itself must
+    # still be a real directory, rather than a link to somebody else's data.
+    if archives.is_link(repository):
         raise UserError("专用备份仓库不能使用目录联接或符号链接。")
-    repository = repository.expanduser().resolve()
+    repository = repository.resolve()
     marker = repository / "repository.json"
     if marker.exists():
         if not _regular(marker) or marker.stat().st_size > 1000 or json.loads(marker.read_text(encoding="utf-8")) != MARKER:

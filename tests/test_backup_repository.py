@@ -106,6 +106,21 @@ class BackupRepositoryTests(unittest.TestCase):
             self.organize()
         self.assertEqual(sentinel.read_text(), "keep")
 
+    def test_system_alias_parent_is_resolved_but_linked_repository_root_is_rejected(self):
+        actual = self.root / "actual-system-directory"
+        actual.mkdir()
+        alias = self.root / "system-alias"
+        try:
+            alias.symlink_to(actual, target_is_directory=True)
+        except OSError:
+            self.skipTest("This host does not permit directory symlink creation")
+        initialized = initialize(alias / "dedicated-backups")
+        self.assertEqual(initialized, (actual / "dedicated-backups").resolve())
+        linked_repository = self.root / "linked-repository"
+        linked_repository.symlink_to(initialized, target_is_directory=True)
+        with self.assertRaises(UserError):
+            initialize(linked_repository)
+
     def test_ordinary_project_and_vault_git_are_opt_in(self):
         from agent_manager.adapters.projects import ProjectAdapter, VaultAdapter
         (self.source / ".git").mkdir()
