@@ -83,7 +83,10 @@ def existing_connection() -> dict:
 
 
 class ServerHermesAdapter:
-    capabilities = frozenset({"observe", "backup", "verify", "restore", "start", "stop", "restart", "logs"})
+    capabilities = frozenset({"observe", "backup", "verify", "restore", "start", "stop", "restart", "logs", "profiles"})
+
+    def profiles(self, resource: Resource, context: TaskContext) -> dict:
+        return self._run(resource, "profiles", context)
 
     def _run(self, resource: Resource, action: str, context: TaskContext, **extra) -> dict:
         payload = {**resource.options, "action": action, **extra}

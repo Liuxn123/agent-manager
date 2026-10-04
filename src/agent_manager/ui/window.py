@@ -65,6 +65,7 @@ class ResourcePage(QWidget):
         super().__init__()
         self.window, self.kinds = window, kinds
         self.rows: list[Resource] = []
+        self.compact = len(kinds) == 1
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
         heading = QLabel(title)
@@ -80,7 +81,13 @@ class ResourcePage(QWidget):
         self.search.setPlaceholderText("搜索名称或目录")
         self.search.textChanged.connect(self.refresh)
         toolbar.addWidget(self.add)
-        toolbar.addWidget(self.search)
+        self.selector = QComboBox(self)
+        self.selector.setMinimumContentsLength(16)
+        self.selector.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.selector.currentIndexChanged.connect(self.select_instance)
+        toolbar.addWidget(self.selector if self.compact else self.search, 1)
+        if self.compact:
+            self.search.hide()
         toolbar.addWidget(button("编辑", lambda: window.edit_resource(self.selected())))
         layout.addLayout(toolbar)
         actions = FlowLayout()
@@ -88,12 +95,11 @@ class ResourcePage(QWidget):
         self.backup_button = button("立即备份", lambda: self.dispatch("backup"), True)
         self.verify_button = button("校验备份", lambda: self.dispatch("verify"))
         self.restore_button = button("恢复备份", lambda: self.dispatch("restore"))
-        self.more_button = button("更多操作", self.more)
+        self.more_button = button("登记管理", self.more)
         self.records_button = button("浏览本地记录", lambda: self.dispatch("records"))
         if kinds == ["agent"]:
             actions.addWidget(self.records_button)
-        self.verify_button.hide()
-        for widget in [self.observe_button, self.backup_button, self.restore_button, self.more_button]:
+        for widget in [self.observe_button, self.backup_button, self.verify_button, self.restore_button]:
             actions.addWidget(widget)
         self.library_button = button("会话与技能", lambda: self.dispatch("library"))
         self.logs_button = button("网关日志", lambda: self.dispatch("logs"))
@@ -102,9 +108,31 @@ class ResourcePage(QWidget):
             actions.addWidget(self.library_button)
         elif kinds == ["hermes_server"]:
             actions.addWidget(self.logs_button)
+            actions.addWidget(button("重启共享网关", lambda: self.dispatch("restart")))
         elif kinds == ["agent"]:
             actions.addWidget(self.search_records_button)
+            self.usage_button = button("Token 用量", self.show_usage)
+            actions.addWidget(self.usage_button)
+            actions.addWidget(button("试一次恢复", lambda: self.window.rehearse_backup(self.selected()) if self.selected() else None))
+            actions.addWidget(button("打开资料目录", lambda: self.dispatch("open")))
+        if kinds == ["hermes_local"]:
+            actions.addWidget(button("备份提交", lambda: self.dispatch("versions")))
+            actions.addWidget(button("打开 Hermes 目录", lambda: self.dispatch("open")))
+        elif kinds == ["hermes_server"]:
+            actions.addWidget(button("查看服务器 Profiles", self.inspect_profiles))
+        actions.addWidget(self.more_button)
         layout.addLayout(actions)
+        self.metrics = []
+        if self.compact:
+            metrics = QHBoxLayout()
+            for label in ("最近备份", "恢复检查", "运行 / 连接", "资料范围"):
+                panel, value, note = card(label, "等待检查", "")
+                note.hide()
+                value.setStyleSheet("font-size: 17px; font-weight: 600;")
+                value.setWordWrap(True)
+                metrics.addWidget(panel, 1)
+                self.metrics.append(value)
+            layout.addLayout(metrics)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.resources_table = table(["名称", "类型", "位置", "状态"])
         self.resources_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -114,7 +142,11 @@ class ResourcePage(QWidget):
         self.resources_table.setMinimumWidth(340)
         self.resources_table.itemSelectionChanged.connect(self.selection_changed)
         self.resources_table.doubleClicked.connect(lambda index: self.show_paths())
-        split.addWidget(self.resources_table)
+        if self.compact:
+            self.resources_table.setParent(self)
+            self.resources_table.hide()
+        else:
+            split.addWidget(self.resources_table)
         tabs = QTabWidget()
         self.details = text_view()
         self.technical_details = text_view()
@@ -153,6 +185,25 @@ class ResourcePage(QWidget):
         row = self.resources_table.currentRow()
         return self.rows[row] if 0 <= row < len(self.rows) else None
 
+    def select_instance(self, row: int) -> None:
+        if 0 <= row < len(self.rows):
+            self.resources_table.selectRow(row)
+
+    def inspect_profiles(self) -> None:
+        resource = self.selected()
+        if resource:
+            from .library import TextReportDialog
+            self.window.submit(resource, "读取服务器 Profiles", lambda context: self.window.service.action(resource, "profiles", context),
+                               lambda report: TextReportDialog(self.window, "服务器 Profiles", {"text": readable_report(report), "note": "每个 Profile 独立保存会话和配置。编辑登记时核对运行目录与备份仓库。"}).exec())
+
+    def show_usage(self) -> None:
+        resource = self.selected()
+        if resource:
+            from ..token_usage import read_usage
+            from .library import TextReportDialog
+            self.window.submit(resource, resource.name + " · 读取 Token 用量", lambda context: read_usage(resource, context),
+                               lambda report: TextReportDialog(self.window, "本地 Token 用量", {"text": readable_report(report), "note": "手动读取本地用量字段；不估算费用、不启动后台监控。"}).exec())
+
     def refresh(self) -> None:
         selected = self.selected()
         query = self.search.text().strip().casefold()
@@ -161,7 +212,8 @@ class ResourcePage(QWidget):
         self.resources_table.setRowCount(len(self.rows))
         for row, resource in enumerate(self.rows):
             location = str(resource.options.get("host") or resource.options.get("home") or resource.options.get("path") or next(iter(resource.options.get("record_paths", [])), "未配置"))
-            state = "任务运行中" if self.window.is_busy(resource.id) else self.window.resource_states.get(resource.id, "等待检查")
+            observation = self.window.observations.get(resource.id, {})
+            state = "任务运行中" if self.window.is_busy(resource.id) else str(observation.get("state") or self.window.resource_states.get(resource.id, "等待检查"))
             for column, value in enumerate([resource.name, KINDS[resource.kind], location, state]):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
@@ -170,11 +222,21 @@ class ResourcePage(QWidget):
         if self.rows:
             self.resources_table.selectRow(row)
         self.resources_table.blockSignals(False)
+        self.selector.blockSignals(True)
+        self.selector.clear()
+        for resource in self.rows:
+            self.selector.addItem(resource.name, resource.id)
+        self.selector.setCurrentIndex(row if self.rows else -1)
+        self.selector.blockSignals(False)
         self.empty.setVisible(not self.rows)
         self.selection_changed()
 
     def selection_changed(self) -> None:
         resource = self.selected()
+        if resource:
+            self.selector.blockSignals(True)
+            self.selector.setCurrentIndex(self.resources_table.currentRow())
+            self.selector.blockSignals(False)
         enabled = bool(resource and not self.window.is_busy(resource.id))
         for widget in [self.observe_button, self.backup_button, self.verify_button, self.restore_button, self.more_button,
                        self.library_button, self.logs_button, self.search_records_button]:
@@ -202,9 +264,18 @@ class ResourcePage(QWidget):
             payload["提示"] = "尚未检查。配置已保存到本机；不会自动连接服务器。"
         self.technical_details.setPlainText(readable_report(payload))
         health = backup_health(self.window.store, resource, self.window.service.backup_root())
+        if self.metrics:
+            counts = (observation or {}).get("counts", {})
+            values = [health["state"], "已演练" if health.get("rehearsed") else "已校验" if health["state"] == "已校验" else "尚待验证",
+                      str((observation or {}).get("state") or ("已连接" if (observation or {}).get("connected") else "等待检查")),
+                      f"{counts.get('sessions', '—')} 会话 · {counts.get('skills', '—')} 技能" if resource.kind == "hermes_local" else resource.options.get("profile_name", "独立资料目录")]
+            for value, label in zip(values, self.metrics):
+                label.setText(str(value))
         summary = f"<h2>{html.escape(resource.name)}</h2><p style='color:#7a849c'>{KINDS[resource.kind]}</p><hr><h3>资料保护</h3><p>{health['state']} · {html.escape(readable_time(health.get('created_at') or '尚无备份'))}</p>"
         summary += "<p>恢复演练：" + ("已通过" if health.get("rehearsed") else "尚未执行") + "</p>"
         if resource.kind == "hermes_server":
+            if resource.options.get("profile_name"):
+                summary += "<h3>当前 Profile：" + html.escape(resource.options['profile_name']) + "</h3><p>" + html.escape(resource.options.get("profile_home", "")) + "</p><p>两个 Profile 共用网关和现有服务器备份。原生备份 / 恢复按整套服务器资料执行。</p>"
             summary += "<h3>服务器</h3><p>" + ("连接成功 · 网关 " + html.escape(readable_report(observation.get('service_state', '未知'))) if observation and observation.get('connected') else "点击检查状态，测试 SSH、网关和备份环境。") + "</p>"
             if observation:
                 summary += f"<p>磁盘 {observation.get('disk_used_percent', '未知')}% · 内存 {observation.get('memory_used_percent', '未知')}%</p><p>备份环境：{'就绪' if observation.get('backup_ready') else '请查看配置与诊断'}</p>"
@@ -241,7 +312,7 @@ class ResourcePage(QWidget):
             paths = [(item["label"], item["path"]) for item in sources_for(resource)]
         else:
             paths = [(label, str(resource.options.get(key, ""))) for key, label in
-                     (("home", "运行目录"), ("path", "项目目录"), ("backup_repo", "备份仓库"), ("workspace", "Workspace"), ("knowledge_repo", "知识库"))]
+                     (("profile_home", "当前 Profile 资料"), ("home", "运行 / 原生备份根目录"), ("path", "项目目录"), ("backup_repo", "备份仓库"), ("workspace", "Workspace"), ("knowledge_repo", "知识库"))]
         for label, path in paths:
             if not path:
                 continue
@@ -278,15 +349,14 @@ class ResourcePage(QWidget):
         capabilities = self.window.service.registry.get(resource).capabilities
         labels = {"start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "Git 拉取（仅快进）", "versions": "查看备份提交", "open": "打开目录", "open_vault": "在 Obsidian 打开"}
         menu = QMenu(self)
-        menu.addAction("校验备份", lambda: self.dispatch("verify"))
-        if resource.kind in {"project", "vault", "agent"}:
+        if resource.kind in {"project", "vault"}:
             menu.addAction("试一次恢复（临时目录）", lambda: self.window.rehearse_backup(resource))
-        if resource.kind == "agent":
-            menu.addAction("搜索本地记录", lambda: self.window.search_records(resource))
-        if resource.kind == "hermes_local":
-            menu.addAction("登记 Workspace 中的项目", self.window.discover_workspace)
         menu.addSeparator()
         for action, label in labels.items():
+            if resource.kind in {"hermes_local", "hermes_server", "agent"}:
+                continue
+            if action in {"start", "stop"} and resource.kind in {"hermes_local", "agent"}:
+                continue
             if action in capabilities and (action != "open_vault" or resource.kind == "vault") and (action != "git_pull" or resource.options.get("manage_git")):
                 menu.addAction(label, lambda action=action: self.dispatch(action))
         menu.addSeparator()
@@ -327,7 +397,7 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("Navigation")
         self.navigation.setIconSize(QSize(22, 22))
-        for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "本地项目", "其他 Agent", "技能与工具", "备份与迁移", "活动记录", "设置"]):
+        for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "本地项目", "其他 Agent", "技能与工具", "备份与迁移", "工作总结", "设置"]):
             self.navigation.addItem(QListWidgetItem(nav_icon(4 if index == 5 else index if index < 5 else index - 1), label))
         sidebar_layout.addWidget(self.navigation, 1)
         help_button = button("使用说明", self.show_guide)
@@ -473,14 +543,24 @@ class MainWindow(QMainWindow):
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
         layout.addWidget(hint)
+        outer = layout
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 6, 0)
         bar = FlowLayout()
         bar.addWidget(button("刷新备份列表", self.refresh_backups))
         bar.addWidget(button("恢复选中备份…", self.restore_selected_backup, True))
-        bar.addWidget(button("从备份文件恢复", self.import_backup))
+        bar.addWidget(button("开始换电脑检查", self.import_backup))
         bar.addWidget(button("恢复演练", self.rehearse_selected_backup))
         bar.addWidget(button("打开备份目录", lambda: self.open_path(self.service.backup_root())))
         bar.addWidget(button("能恢复什么", self.show_restore_scope))
         layout.addLayout(bar)
+        from .migration import MigrationChecklist
+        self.migration_checklist = MigrationChecklist()
+        self.migration_task_ids = set()
+        layout.addWidget(self.migration_checklist)
         repository_bar = QHBoxLayout()
         self.agent_repository_label = QLabel()
         self.agent_repository_label.setWordWrap(True)
@@ -491,8 +571,11 @@ class MainWindow(QMainWindow):
         repository_bar.addWidget(button("整理 Agent 备份", self.organize_agent_repository))
         layout.addLayout(repository_bar)
         self.backup_table = table(["资源", "时间", "文件数", "大小", "校验状态"])
+        self.backup_table.setMinimumHeight(180)
         layout.addWidget(self.backup_table)
         self.backup_rows: list[tuple[Resource, dict]] = []
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
         self.stack.addWidget(page)
 
     def show_restore_scope(self) -> None:
@@ -526,10 +609,31 @@ class MainWindow(QMainWindow):
 
     def build_tasks(self) -> None:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        title = QLabel("任务记录")
+        outer = QVBoxLayout(page)
+        title = QLabel("工作总结与操作记录")
         title.setObjectName("Title")
-        layout.addWidget(title)
+        outer.addWidget(title)
+        self.activity_tabs = QTabWidget()
+        summaries = QWidget()
+        summary_layout = QVBoxLayout(summaries)
+        note = QLabel("记下今天做了什么、遇到的问题和下一步。项目的具体日志在“本地项目”里写；这里保存你的总体总结。")
+        note.setWordWrap(True)
+        summary_layout.addWidget(note)
+        self.summary_input = QTextEdit()
+        self.summary_input.setPlaceholderText("完成了什么？下一步准备做什么？")
+        self.summary_input.setMaximumHeight(150)
+        summary_layout.addWidget(self.summary_input)
+        summary_layout.addWidget(button("保存工作总结", self.save_work_summary), alignment=Qt.AlignmentFlag.AlignLeft)
+        self.summary_history = text_view()
+        path = self.store.root / "work-summary.md"
+        if path.is_file() and path.stat().st_size <= 2 * 1024 * 1024:
+            self.summary_history.setMarkdown(path.read_text(encoding="utf-8"))
+        else:
+            self.summary_history.setPlainText("还没有工作总结。这里不会自动复制 Agent 对话。")
+        summary_layout.addWidget(self.summary_history, 1)
+        self.activity_tabs.addTab(summaries, "我的工作总结")
+        operations = QWidget()
+        layout = QVBoxLayout(operations)
         hint = QLabel("任务结果与脱敏日志保存在这台电脑。取消会在安全检查点生效；恢复切换期间等待工具完成。")
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
@@ -552,7 +656,19 @@ class MainWindow(QMainWindow):
         split.setSizes([330, 220])
         layout.addWidget(split, 1)
         self.task_rows: list[dict] = []
+        self.activity_tabs.addTab(operations, "操作记录 / 排查失败")
+        outer.addWidget(self.activity_tabs, 1)
         self.stack.addWidget(page)
+
+    def save_work_summary(self) -> None:
+        from ..work_summaries import append_summary
+        try:
+            text = append_summary(self.store.root, self.summary_input.toPlainText())
+            self.summary_history.setMarkdown(text)
+            self.summary_input.clear()
+            self.statusBar().showMessage("工作总结已保存，随管家资料一起带走")
+        except (OSError, UserError) as exc:
+            QMessageBox.warning(self, "总结未保存", str(exc))
 
     def build_settings(self) -> None:
         from .settings import build_settings
@@ -672,7 +788,7 @@ class MainWindow(QMainWindow):
         page_index = {"hermes_local": 1, "hermes_server": 2, "project": 3, "vault": 3, "agent": 4}[resource.kind]
         self.navigation.setCurrentRow(page_index)
         if page_index == 3:
-            self.project_page.tabs.setCurrentIndex(1)
+            self.project_page.show_backup_resource(resource)
         page = self.resource_pages[page_index - 1]
         row = next((i for i, item in enumerate(page.rows) if item.id == resource.id), None)
         if row is not None:
@@ -751,6 +867,7 @@ class MainWindow(QMainWindow):
             label.setText(str(sum(resource.kind in kinds for resource in resources)))
         for page in self.resource_pages:
             page.refresh()
+        self.project_page.refresh_myself()
         self.refresh_dashboard()
 
     def add_resource(self, kind: str) -> None:
@@ -802,6 +919,14 @@ class MainWindow(QMainWindow):
         if not entry:
             return
         _, resource_id, callback = entry
+        if identity in self.migration_task_ids:
+            self.migration_task_ids.discard(identity)
+            if state in {"failed", "cancelled"}:
+                for index in (1, 2, 3, 4):
+                    text = self.migration_checklist.table.item(index, 1).text()
+                    if not text.startswith(("通过", "已恢复")):
+                        self.migration_checklist.set_step(index, "未通过：" + str(result.get("error", STATE_LABELS.get(state, state))))
+                        break
         observation = self.store.evidence("observe:" + resource_id)
         if observation:
             self.observations[resource_id] = observation
@@ -818,6 +943,7 @@ class MainWindow(QMainWindow):
         elif state == "failed":
             QMessageBox.warning(self, "操作未完成", str(result.get("error", "请查看任务记录。")))
         self.refresh_dashboard()
+        self.refresh_common_password()
 
     def password_input(self, creating: bool) -> tuple[str, bool] | None:
         dialog = PasswordDialog(self, creating)
@@ -826,12 +952,41 @@ class MainWindow(QMainWindow):
         return dialog.password.text(), dialog.remember.isChecked()
 
     def resolve_password(self, resource: Resource, supplied: str, remember: bool = False) -> str:
-        password = supplied or self.service.secrets.get(resource.id + ":backup")
+        password = supplied or self.service.common_password or self.service.secrets.get(resource.id + ":backup")
         if not password:
-            raise UserError("没有可用口令，请输入口令或保存到系统凭据存储。")
+            raise UserError("请在设置中输入统一备份密码，或输入这份旧备份原来的密码。")
         if remember:
-            self.service.secrets.save(resource.id + ":backup", password)
+            self.service.common_password = password
         return password
+
+    def refresh_common_password(self) -> None:
+        if hasattr(self, "common_password_status"):
+            self.common_password_status.setText("已输入 · 本次打开期间，所有新建 .amb 备份共用它" if self.service.common_password else "尚未输入 · 第一次备份时也可以设置")
+
+    def set_common_password(self) -> None:
+        supplied = self.password_input(True)
+        if supplied and supplied[0]:
+            self.service.common_password = supplied[0]
+            self.refresh_common_password()
+
+    def forget_common_password(self) -> None:
+        self.service.common_password = ""
+        self.refresh_common_password()
+
+    def maintenance_tools(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("电脑维护")
+        dialog.resize(600, 340)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("这些操作用于排查问题或迁移登记清单。完整资料恢复请到“备份与换电脑”。"))
+        actions = FlowLayout()
+        for label, action in [("检查电脑环境", self.diagnostics), ("导出登记清单", self.export_config), ("导入登记清单", self.import_config),
+                              ("解锁旧版密码记忆", self.unlock_vault), ("打开管家资料", lambda: self.open_path(self.store.root))]:
+            actions.addWidget(button(label, action))
+        layout.addLayout(actions)
+        self.settings_info = text_view()
+        layout.addWidget(self.settings_info)
+        dialog.exec()
 
     def perform(self, resource: Resource | None, action: str, archive_source: str = "") -> None:
         if resource is None:
@@ -876,11 +1031,12 @@ class MainWindow(QMainWindow):
             return
         if action == "backup":
             if resource.kind in {"hermes_local", "hermes_server"}:
-                if QMessageBox.question(self, "创建备份", f"为 {resource.name} 创建备份？将沿用此资源的 Git 推送配置。") != QMessageBox.StandardButton.Yes:
+                scope = "\n服务器现有原生工具备份整套默认目录和 Profiles；两个 Profile 共用此备份。" if resource.kind == "hermes_server" and resource.options.get("profile_name") else ""
+                if QMessageBox.question(self, "创建备份", f"为 {resource.name} 创建备份？将沿用此资源的 Git 推送配置。" + scope) != QMessageBox.StandardButton.Yes:
                     return
                 self.submit(resource, resource.name + " · 备份", lambda context: self.service.backup(resource, context))
             else:
-                supplied = self.password_input(True)
+                supplied = ("", False) if self.service.common_password else self.password_input(True)
                 if supplied:
                     self.submit(resource, resource.name + " · 加密备份", lambda context: self.service.backup(resource, context, self.resolve_password(resource, *supplied)), self.backup_completed)
             return
@@ -899,6 +1055,8 @@ class MainWindow(QMainWindow):
         if action in {"start", "stop", "restart", "git_pull"}:
             prompt = {"start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "拉取 Git 更新"}[action]
             message = f"对 {resource.name} 执行“{prompt}”？"
+            if resource.kind == "hermes_server" and resource.options.get("profile_name"):
+                message += "\n这是共享网关服务，会影响使用该服务的全部 Profile。"
             if action == "start" and resource.kind != "hermes_server":
                 message += "\n\n程序：" + str(resource.options.get("executable") or "尚未配置") + "\n参数：" + str(safe_result(resource.options.get("arguments", [])))
             if QMessageBox.question(self, "确认操作", message) != QMessageBox.StandardButton.Yes:
@@ -947,10 +1105,15 @@ class MainWindow(QMainWindow):
         source = archive_source or QFileDialog.getOpenFileName(self, "选择要恢复的备份文件", str(self.service.backup_root()), "加密资料备份 (*.amb)")[0]
         if not source:
             return
+        self.navigation.setCurrentRow(6)
+        checklist = self.migration_checklist
+        checklist.reset()
+        checklist.set_step(0, "已选择：" + Path(source).name)
         supplied = self.password_input(False)
         if supplied is None:
+            checklist.set_step(1, "尚未输入密码，可重新开始检查")
             return
-        password = supplied[0]
+        password = supplied[0] or self.service.common_password
         if not password and resource:
             try:
                 password = self.resolve_password(resource, "")
@@ -958,9 +1121,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "需要备份口令", str(exc))
                 return
         if not password:
+            checklist.set_step(1, "缺少创建备份时使用的密码")
             QMessageBox.warning(self, "需要备份口令", "换电脑恢复时请输入创建这份备份时使用的口令。")
             return
         def inspected(report):
+            checklist.set_step(1, "通过 · 密码可以解锁这份备份")
+            checklist.set_step(2, f"通过 · 已校验 {report['file_count']} 个文件")
             if report["kind"] not in {"project", "vault", "agent"}:
                 QMessageBox.warning(self, "请选择对应恢复入口", "Hermes 原生备份请在 Hermes 页面恢复。")
                 return
@@ -973,6 +1139,7 @@ class MainWindow(QMainWindow):
             restore_root = self.store.portable_root / "restored" if self.store.portable_root else Path.home() / "Documents/Agent恢复"
             dialog = TransferDialog(self, report, str(restore_root / safe_title))
             if dialog.exec() != QDialog.DialogCode.Accepted:
+                checklist.set_step(3, "尚未选定目标目录，可重新开始")
                 return
             target = dialog.target.text().strip()
             folders = {key: edit.text().strip() for key, edit in dialog.folder_fields.items()}
@@ -982,9 +1149,13 @@ class MainWindow(QMainWindow):
                     raise UserError("备份文件在解锁后改变，请重新选择文件。")
                 return plan
             def confirm(plan):
+                checklist.set_step(3, "通过 · 新目录 / 空目录：" + plan.target)
                 if PlanDialog(self, original, plan).exec() != QDialog.DialogCode.Accepted:
+                    checklist.set_step(4, "已取消执行，原目录未修改")
                     return
+                checklist.set_step(4, "正在恢复 · 请等待文件校验完成")
                 def completed(result):
+                    checklist.set_step(4, "已恢复并校验 · 资料登记完成")
                     new_resource = restored_resource(report, Path(plan.target), plan.summary["component_folders"])
                     if any(item.id == new_resource.id for item in self.store.resources()):
                         new_resource.options["source_resource_id"] = new_resource.id
@@ -992,22 +1163,18 @@ class MainWindow(QMainWindow):
                         new_resource.name += "（恢复）"
                     self.store.save_resource(new_resource)
                     if supplied[1]:
-                        try:
-                            self.service.secrets.save(new_resource.id + ":backup", password)
-                        except UserError as exc:
-                            QMessageBox.warning(self, "资料已恢复，口令未保存", str(exc))
+                        self.service.common_password = password
+                        self.refresh_common_password()
                     self.refresh_resources()
                     self.navigation.setCurrentRow(4 if new_resource.kind == "agent" else 3)
-                    if new_resource.kind != "agent":
-                        self.project_page.tabs.setCurrentIndex(1)
                     for page in self.resource_pages:
                         row = next((i for i, item in enumerate(page.rows) if item.id == new_resource.id), None)
                         if row is not None:
                             page.resources_table.selectRow(row)
                     QMessageBox.information(self, "恢复完成", "资料已恢复并在这台电脑登记。\n\n位置：" + plan.target + "\n\n工作 Agent 可点击“浏览本地记录”。在原应用继续工作前，请核对项目路径并按需重新登录。")
-                self.submit(original, original.name + " · 换电脑恢复", lambda context: self.service.restore(original, plan, context, password), completed)
-            self.submit(original, original.name + " · 恢复预览", preview, confirm)
-        self.submit(resource, "解锁并检查备份内容", lambda context: archives.verify_archive(Path(source), password, context), inspected)
+                self.migration_task_ids.add(self.submit(original, original.name + " · 换电脑恢复", lambda context: self.service.restore(original, plan, context, password), completed))
+            self.migration_task_ids.add(self.submit(original, original.name + " · 恢复预览", preview, confirm))
+        self.migration_task_ids.add(self.submit(resource, "解锁并检查备份内容", lambda context: archives.verify_archive(Path(source), password, context), inspected))
 
     def refresh_tasks(self) -> None:
         if not hasattr(self, "task_table"):
@@ -1039,6 +1206,7 @@ class MainWindow(QMainWindow):
 
     def show_resource_activity(self, resource: Resource) -> None:
         self.navigation.setCurrentRow(7)
+        self.activity_tabs.setCurrentIndex(1)
         self.task_filter.setCurrentIndex(self.task_filter.findData(resource.id))
         self.refresh_tasks()
 
@@ -1217,4 +1385,6 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         self.schedule_timer.stop()
         self.project_page.stop_updates()
+        self.service.common_password = ""
+        self.service.secrets.lock()
         event.accept()

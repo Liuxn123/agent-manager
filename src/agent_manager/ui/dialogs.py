@@ -57,6 +57,8 @@ class ResourceDialog(QDialog):
             self.form.addRow("", self.push)
             note = "调用现有 Hermes 备份仓库工具。恢复前退出 Hermes，口令文件由你在本机选择，内容不会写入资源配置。"
         elif kind == "hermes_server":
+            self.add_field("profile_name", "显示的 Profile 名称（可选）", options.get("profile_name", ""))
+            self.add_field("profile_home", "Profile 资料目录（可选）", options.get("profile_home", ""))
             for key, label, default, chooser in [
                 ("host", "SSH 别名 / user@host", "", ""), ("port", "SSH 端口", "22", ""),
                 ("user", "SSH 登录账号（别名已配置可留空）", "", ""),
@@ -232,7 +234,7 @@ class PasswordDialog(QDialog):
         self.setWindowTitle("加密备份口令" if creating else "解锁备份")
         self.resize(480, 230)
         layout = QVBoxLayout(self)
-        hint = QLabel(("设置一个备份口令，用来保护项目与记录。" if creating else "输入创建这份备份时使用的口令。") + "这不是 Agent 的登录密码。请单独保存口令，换电脑恢复时需要它。已为这项资料保存口令时，可以留空。")
+        hint = QLabel(("设置统一备份密码：所有新建的 Agent 和 myself 加密备份共用它。" if creating else "输入这份备份原来的密码；已经输入统一密码时，可以留空使用它。") + "请单独记住，换电脑时需要输入。关闭管家后会忘记本次输入的密码。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         form = QFormLayout()
@@ -245,7 +247,8 @@ class PasswordDialog(QDialog):
             form.addRow("再次输入", self.confirm)
         layout.addLayout(form)
         portable = bool(getattr(getattr(parent, "store", None), "portable_root", None))
-        self.remember = QCheckBox("保存至加密便携口令库（先在设置中解锁）" if portable else "保存至这台电脑的系统凭据存储")
+        self.remember = QCheckBox("本次打开期间作为统一备份密码")
+        self.remember.setChecked(creating)
         layout.addWidget(self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("继续")

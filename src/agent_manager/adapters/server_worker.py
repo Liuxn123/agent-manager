@@ -37,7 +37,7 @@ def token(repo):
 
 def main(config):
     action = config['action']
-    if action not in {'observe', 'backup', 'verify', 'plan_restore', 'restore', 'start', 'stop', 'restart', 'logs'}:
+    if action not in {'observe', 'backup', 'verify', 'plan_restore', 'restore', 'start', 'stop', 'restart', 'logs', 'profiles'}:
         raise RuntimeError('unsupported_action')
     repo = Path(config['backup_repo'])
     home = Path(config['home'])
@@ -49,6 +49,13 @@ def main(config):
     if scope not in {'user', 'system'}:
         raise RuntimeError('invalid_scope')
     service_command = ['systemctl'] + (['--user'] if scope == 'user' else [])
+    identity_files = ['config.yaml', '.env', 'SOUL.md', 'profile.yaml', 'auth.json', 'state.db']
+    profile_root = home / 'profiles'
+    profiles = [{'name': p.name, 'home': str(p)} for p in sorted(profile_root.iterdir())
+                if p.is_dir() and not p.is_symlink() and any((p / name).is_file() for name in identity_files)][:50] if profile_root.is_dir() else []
+    if action == 'profiles':
+        return {'profiles': profiles, 'default_home': str(home), 'service': service,
+                'note': 'Profile data directories are separate. Gateway and existing native backup repository may be shared.'}
     if action == 'logs':
         command = ['journalctl'] + (['--user'] if scope == 'user' else [])
         text = execute(command + ['--no-pager', '-n', '80', '-u', service, '-o', 'short-iso'], timeout=30)
@@ -76,7 +83,7 @@ def main(config):
                 'service_scope': scope, 'load_average': list(os.getloadavg()), 'cpu_count': os.cpu_count(),
                 'disk_used_percent': round(usage.used * 100 / usage.total, 1), 'backup_created_at': latest,
                 'memory_used_percent': round((1 - memory['MemAvailable'] / memory['MemTotal']) * 100, 1) if memory.get('MemTotal') and 'MemAvailable' in memory else None,
-                'profiles': sorted(p.name for p in (home / 'profiles').iterdir() if p.is_dir())[:50] if (home / 'profiles').is_dir() else [],
+                'profiles': [p['name'] for p in profiles], 'profile_details': profiles,
                 'home_present': home.is_dir(), 'backup_repo_present': repo.is_dir(),
                 'backup_tool_present': backup_tool.is_file(), 'restore_tool_present': restore_tool.is_file(),
                 'backup_key_file': key_file, 'backup_key_available': bool(key_file),

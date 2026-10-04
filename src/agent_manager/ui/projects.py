@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, QEvent, QFileSystemWatcher
@@ -14,6 +15,46 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QL
 from ..domain import Resource, UserError
 from ..project_workspaces import ProjectWorkspace, STATES
 from ..obsidian import project_uri, index_uri
+from .components import FlowLayout
+
+
+class ProjectLogView(QWidget):
+    """Present dated entries while keeping HANDOFF as the single source."""
+    def __init__(self, view):
+        super().__init__()
+        self.view, self.text, self.entries = view, "", []
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        self.selector = QComboBox()
+        self.selector.currentIndexChanged.connect(self.render)
+        row.addWidget(self.selector, 1)
+        self.all = QCheckBox("查看完整交接原文")
+        self.all.toggled.connect(self.render)
+        row.addWidget(self.all)
+        layout.addLayout(row)
+        layout.addWidget(view, 1)
+
+    def set_text(self, text):
+        self.text = text
+        headings = list(re.finditer(r"(?m)^## (.+)$", text))
+        self.entries = [(match.group(1), text[match.start():headings[i + 1].start() if i + 1 < len(headings) else len(text)].strip())
+                        for i, match in enumerate(headings) if re.search(r"\d{4}-\d{2}-\d{2}", match.group(1))]
+        self.entries.reverse()
+        self.selector.blockSignals(True)
+        self.selector.clear()
+        for title, _ in self.entries:
+            self.selector.addItem(title)
+        self.selector.blockSignals(False)
+        self.render()
+
+    def render(self, *_):
+        row = self.selector.currentIndex()
+        if self.all.isChecked():
+            self.view.setMarkdown(self.text)
+        elif 0 <= row < len(self.entries):
+            self.view.setMarkdown(self.entries[row][1])
+        else:
+            self.view.setPlainText("还没有按日期记录的日志。点击“写日志”记录完成内容、验证和下一步。原有交接内容可勾选“查看完整交接原文”。")
 
 
 class ProjectDialog(QDialog):
@@ -67,7 +108,6 @@ class ProjectPage(QWidget):
         note.setWordWrap(True)
         note.setObjectName("Subtitle")
         layout.addWidget(note)
-        self.tabs = QTabWidget()
         lifecycle = QWidget()
         body = QVBoxLayout(lifecycle)
         body.setContentsMargins(0, 8, 0, 0)
@@ -86,11 +126,20 @@ class ProjectPage(QWidget):
         menu.addSeparator()
         menu.addAction("刷新 Obsidian 索引", self.refresh_indexes)
         self.obsidian_menu.setMenu(menu)
-        root_row.addWidget(self.obsidian_menu)
+        body.addLayout(root_row)
+        root_actions = FlowLayout()
+        root_actions.addWidget(self.obsidian_menu)
         choose = QPushButton("选择工作区…")
         choose.clicked.connect(self.choose_workspace)
-        root_row.addWidget(choose)
-        body.addLayout(root_row)
+        root_actions.addWidget(choose)
+        self.myself_status = QLabel()
+        self.myself_status.setWordWrap(True)
+        root_actions.addWidget(self.myself_status)
+        for label, action in [("备份 myself", "backup"), ("恢复 myself", "restore"), ("myself 配置", "edit")]:
+            control = QPushButton(label)
+            control.clicked.connect(lambda checked=False, action=action: self.myself_action(action))
+            root_actions.addWidget(control)
+        body.addLayout(root_actions)
         toolbar = QHBoxLayout()
         self.new_button = QPushButton("新建项目")
         self.new_button.setProperty("primary", True)
@@ -109,13 +158,13 @@ class ProjectPage(QWidget):
         refresh.clicked.connect(self.refresh)
         toolbar.addWidget(refresh)
         body.addLayout(toolbar)
-        actions = QHBoxLayout()
+        actions = FlowLayout()
         self.open_button = QPushButton("打开文件夹")
         self.open_button.clicked.connect(self.open_project)
         self.obsidian_button = QPushButton("Obsidian 中打开")
         self.obsidian_button.setToolTip("打开当前状态、任务、日志，或所选笔记的原文件")
         self.obsidian_button.clicked.connect(self.open_in_obsidian)
-        self.log_button = QPushButton("写日志 / 交接")
+        self.log_button = QPushButton("写日志")
         self.log_button.clicked.connect(self.append_log)
         self.edit_button = QPushButton("编辑当前文档")
         self.edit_button.clicked.connect(self.edit_document)
@@ -123,7 +172,6 @@ class ProjectPage(QWidget):
         self.move_button.clicked.connect(self.move_project)
         for widget in (self.open_button, self.obsidian_button, self.log_button, self.edit_button, self.move_button):
             actions.addWidget(widget)
-        actions.addStretch()
         body.addLayout(actions)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.table = QTableWidget(0, 3)
@@ -145,7 +193,11 @@ class ProjectPage(QWidget):
         for name in ("当前状态", "任务入口", "日志与交接"):
             view = QTextBrowser()
             view.setOpenExternalLinks(True)
-            self.documents.addTab(view, name)
+            if name == "日志与交接":
+                self.log_view = ProjectLogView(view)
+                self.documents.addTab(self.log_view, "项目日志")
+            else:
+                self.documents.addTab(view, name)
             self.views.append(view)
         notes_page = QWidget()
         notes_layout = QVBoxLayout(notes_page)
@@ -174,9 +226,11 @@ class ProjectPage(QWidget):
         self.message.setObjectName("Subtitle")
         self.message.setWordWrap(True)
         body.addWidget(self.message)
-        self.tabs.addTab(lifecycle, "项目管理")
-        self.tabs.addTab(backup_page, "资料备份与 Obsidian")
-        layout.addWidget(self.tabs)
+        layout.addWidget(lifecycle, 1)
+        self.backup_page = backup_page
+        backup_page.setParent(self)
+        backup_page.hide()
+        self.refresh_myself()
         self.project_rows = []
         self.watcher = QFileSystemWatcher(self)
         self.reload_timer = QTimer(self)
@@ -188,6 +242,37 @@ class ProjectPage(QWidget):
         self.window.installEventFilter(self)
         self.render()
         QTimer.singleShot(0, self.refresh)
+
+    def myself_resource(self):
+        return next((r for r in self.window.store.resources() if r.kind in {"project", "vault"} and Path(r.options.get("path", "")).name.casefold() == "myself"), None)
+
+    def refresh_myself(self):
+        from ..maintenance import backup_health
+        resource = self.myself_resource()
+        self.myself_status.setText("myself：" + (backup_health(self.window.store, resource, self.window.service.backup_root())["state"] if resource else "未登记"))
+
+    def myself_action(self, action):
+        resource = self.myself_resource()
+        if not resource:
+            self.window.add_resource("vault")
+        elif action == "edit":
+            self.window.edit_resource(resource)
+        else:
+            self.window.perform(resource, action)
+
+    def show_backup_resource(self, resource):
+        # Legacy/restored registrations remain accessible without a second project tab.
+        dialog = QDialog(self)
+        dialog.setWindowTitle("资料备份 · " + resource.name)
+        dialog.resize(1000, 680)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(self.backup_page)
+        self.backup_page.show()
+        row = next((i for i, r in enumerate(self.backup_page.rows) if r.id == resource.id), 0)
+        self.backup_page.resources_table.selectRow(row)
+        dialog.exec()
+        self.backup_page.setParent(self)
+        self.backup_page.hide()
 
     def root(self) -> Path | None:
         value = self.window.store.setting("project_workspace", "")
@@ -315,7 +400,10 @@ class ProjectPage(QWidget):
                 return
             for view, document in zip(self.views, report["documents"]):
                 view.document().setBaseUrl(QUrl.fromLocalFile(str(Path(document["path"]).parent) + os.sep))
-                view.setMarkdown(document["text"])
+                if view is self.views[2]:
+                    self.log_view.set_text(document["text"])
+                else:
+                    view.setMarkdown(document["text"])
             self.note_list.blockSignals(True)
             for note in report["notes"]:
                 cell = QListWidgetItem(note["name"])
@@ -344,7 +432,7 @@ class ProjectPage(QWidget):
         return super().eventFilter(watched, event)
 
     def reload_external_changes(self):
-        if self.closed or not self.isVisible() or self.tabs.currentIndex() != 0 or not self.root():
+        if self.closed or not self.isVisible() or not self.root():
             return
         if self.owner() and self.window.is_busy(self.owner().id):
             self.reload_timer.start()
@@ -437,19 +525,26 @@ class ProjectPage(QWidget):
             return
         dialog = QDialog(self)
         dialog.setWindowTitle(item["name"] + " · 写日志 / 交接")
-        dialog.resize(610, 430)
+        dialog.resize(610, 620)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("追加到 HANDOFF，保留历史；请记录实际结果、验证、未完成项和下一步。"))
-        text = QTextEdit()
-        text.setPlaceholderText("已做：\n验证：\n未完成 / 阻塞：\n下一步：")
-        layout.addWidget(text)
+        layout.addWidget(QLabel("写在项目原来的日志文件里，Obsidian 看到同一份内容。"))
+        fields = []
+        for label, placeholder in [("完成了什么", "记录实际结果"), ("如何确认", "测试、检查结果或证据"), ("未完成 / 遇到的问题", "没有可以留空"), ("下一步", "下次从哪里继续")]:
+            layout.addWidget(QLabel(label))
+            text = QTextEdit()
+            text.setPlaceholderText(placeholder)
+            text.setMaximumHeight(100)
+            layout.addWidget(text)
+            fields.append((label, text))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            note = text.toPlainText()
+            note = "\n\n".join("### " + label + "\n" + edit.toPlainText().strip() for label, edit in fields if edit.toPlainText().strip())
+            if not note:
+                return
             workspace = self.workspace()
             self.submit("追加项目日志与交接", lambda context: workspace.append_log(item["id"], note, context), lambda report: self.selection_changed(), persist_result=False)
 

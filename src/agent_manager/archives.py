@@ -209,6 +209,11 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
     records, directories, excluded = [], [], []
     total = 0
     skip = SKIP_DIRS | {"tmp", "cache", "Cache", "Caches", "GPUCache", "Code Cache", "logs", "worktrees"} | set(resource.options.get("exclude_dirs", []))
+    codex = str(resource.options.get("engine", "")).casefold() == "codex"
+    if codex:
+        skip |= {".sandbox", ".sandbox-secrets", "thread-writer-locks"}
+    def traversal_error(error):
+        raise UserError(f"无法遍历资料目录：{error.filename}（{type(error).__name__}）。请检查权限。") from error
     salt, nonce = os.urandom(16), os.urandom(12)
     encryptor = Cipher(algorithms.AES(key_for(password, salt)), modes.GCM(nonce)).encryptor()
     encryptor.authenticate_additional_data(MAGIC)
@@ -222,7 +227,7 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                     source, prefix = Path(component["path"]), component["prefix"]
                     directories.append(prefix)
                     context.log("正在保存：" + component["label"])
-                    for root, dirs, files in os.walk(source, followlinks=False):
+                    for root, dirs, files in os.walk(source, followlinks=False, onerror=traversal_error):
                         context.checkpoint()
                         current = Path(root)
                         retained = []
@@ -239,6 +244,9 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                             context.checkpoint()
                             path = current / name
                             relative = safe_name(prefix + "/" + path.relative_to(source).as_posix())
+                            if codex and (name == ".sandbox-secrets" or (name.startswith(".codex-provisioning-") and name.endswith(".guard"))):
+                                excluded.append(relative)
+                                continue
                             if is_database_companion(path):
                                 excluded.append(relative)
                                 continue
@@ -246,7 +254,8 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                                 excluded.append(relative)
                                 continue
                             mode = stat.S_IMODE(path.stat().st_mode)
-                            with snapshot_file(path, context) as (read_path, database):
+                            live_log = codex and component["role"] == "records" and path.suffix == ".jsonl" and any(part in {"sessions", "archived_sessions"} for part in path.relative_to(source).parts[:-1])
+                            with snapshot_file(path, context, append_log=live_log) as (read_path, database):
                                 before = read_path.stat()
                                 total += before.st_size
                                 if total > MAX_SIZE or len(records) >= MAX_FILES:
@@ -260,7 +269,7 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                                 after = read_path.stat()
                                 if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
                                     raise UserError("文件在备份期间发生变化，请退出原应用后重新备份。")
-                                records.append({"path": relative, "sha256": digest.hexdigest(), "size": before.st_size, "mode": mode, "database_snapshot": database})
+                                records.append({"path": relative, "sha256": digest.hexdigest(), "size": before.st_size, "mode": mode, "database_snapshot": database, "complete_log_snapshot": live_log})
                 manifest = {"schema_version": 1, "resource_id": resource.id, "kind": resource.kind, "resource_name": resource.name,
                             "engine": resource.options.get("engine", "其他 Agent"), "components": components,
                             "created_at": now(), "files": records, "directories": directories, "excluded": excluded}
@@ -275,6 +284,8 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                     "file_count": len(records), "size": final.stat().st_size, "excluded_count": len(excluded), "encrypted": True}
         final.with_suffix(".json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         context.log("项目文件与本地记录已一起保存。复制此 .amb 文件和独立保存的口令即可换电脑恢复。")
+        if codex:
+            context.log("Codex 会话保存读取开始时已完成的 JSONL 记录，随后新增内容留待下次备份；最终迁移前请退出原应用再备份。运行锁和沙箱缓存已排除。")
         return {**metadata, "archive": str(final), "excluded": excluded[:100], "verified": False}
     finally:
         temporary.unlink(missing_ok=True)

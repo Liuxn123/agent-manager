@@ -37,6 +37,7 @@ class ApplicationService:
         self.registry = build_registry()
         self.locks = ResourceLocks()
         self.secrets = SecretStore(store.portable_root)
+        self.common_password = ""
 
     def backup_root(self) -> Path:
         default = (self.store.portable_root / "backups") if self.store.portable_root else self.store.root / "backups"
@@ -147,9 +148,9 @@ class ApplicationService:
         if resource.kind in {"project", "vault", "agent"}:
             if resource.kind == "agent" and self.registry.get(resource).external_pids(resource):
                 return {"skipped": True, "note": "原应用仍在运行，稍后自动重试。"}
-            password = self.secrets.get(resource.id + ":backup") or ""
+            password = self.common_password or self.secrets.get(resource.id + ":backup") or ""
             if not password:
-                return {"skipped": True, "note": "请先保存备份口令并解锁口令库。"}
+                return {"skipped": True, "note": "请在设置中输入统一备份密码；本次打开期间有效。"}
         self.store.save_evidence("schedule:" + resource.id, {"last_attempt_at": now()})
         result = self.backup(resource, context, password)
         if resource.kind in {"project", "vault", "agent"}:

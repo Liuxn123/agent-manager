@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': '设置默认只保留备份位置、打开与更换按钮；工作台移除全局记录搜索和七天活动图，改为需要处理的事项与最近备份。\n\n新增独立“技能与工具”：统一查看 Skills、MCP 与提示词，导入及复制本地技能，新建编辑通用提示词；MCP 清单仅查看，不自动改写原配置或启用工具。通用库随便携目录携带，可用现有加密流程备份。\n\n保留管理页长文字完整换行、Hermes 会话与技能浏览、服务器网关日志及按资源操作记录。备份页加入恢复范围说明；图形界面数据恢复测试核对中文文件、聊天、附件、SQLite 与自动登记。原软件安装、登录和会话接续仍需在原应用确认。\n\nWindows、Linux、macOS Apple Silicon 与 Intel 均完成测试、打包、解压启动和便携目录迁移验证。更新时保留原 data、backups 与恢复资料。'})
+            'body': 'Hermes 改为顶部实例 / Profile 选择，常用操作直接展示；服务器两个 Profile 明确共用网关和现有整套备份。项目与 Obsidian 合并，保留 myself 备份入口，日志按日期查看并分项填写。\n\nAgent / myself 新建加密备份共用本次打开的密码，关闭后忘记。修复 Codex 运行锁、受保护沙箱与静止 SQLite 只读备份；实际本机 5869 文件已完成隔离加密、校验、恢复。\n\n换电脑显示逐项任务清单，新增工作总结、手动限量的 Codex Token 用量统计，更新离线分模块说明。原应用安装、登录和续聊仍需在原客户端验证。\n\nWindows、Linux、macOS Apple Silicon 和 Intel 完成自动测试及便携包解压启动与移动验证。升级保留 data、backups、restored。'})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}
