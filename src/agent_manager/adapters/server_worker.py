@@ -57,10 +57,26 @@ def main(config):
         metadata = repo / 'snapshot/backup.json'
         if metadata.is_file() and metadata.stat().st_size < 100000:
             latest = json.loads(metadata.read_text()).get('created_at')
+        memory = {}
+        meminfo = Path('/proc/meminfo')
+        if meminfo.is_file():
+            for line in meminfo.read_text().splitlines():
+                key, _, value = line.partition(':')
+                if key in {'MemTotal', 'MemAvailable'}:
+                    memory[key] = int(value.strip().split()[0])
+        key_candidates = [home / '.hermes-backup-passphrase', repo / '.hermes-backup-passphrase', Path('/home/hermes/.hermes-backup-passphrase')]
+        key_file = next((str(path) for path in key_candidates if path.is_file()), '')
+        backup_tool = repo / 'tools/hermes_server_backup.py'
+        restore_tool = repo / 'tools/hermes_restore_server.py'
         return {'connected': True, 'service_state': state if state in {'active','inactive','failed','activating','deactivating','unknown'} else 'unknown',
                 'service_scope': scope, 'load_average': list(os.getloadavg()), 'cpu_count': os.cpu_count(),
                 'disk_used_percent': round(usage.used * 100 / usage.total, 1), 'backup_created_at': latest,
-                'profiles': [name for name in ('pigzhulin','gugu') if (home / 'profiles' / name).is_dir()]}
+                'memory_used_percent': round((1 - memory['MemAvailable'] / memory['MemTotal']) * 100, 1) if memory.get('MemTotal') and 'MemAvailable' in memory else None,
+                'profiles': sorted(p.name for p in (home / 'profiles').iterdir() if p.is_dir())[:50] if (home / 'profiles').is_dir() else [],
+                'home_present': home.is_dir(), 'backup_repo_present': repo.is_dir(),
+                'backup_tool_present': backup_tool.is_file(), 'restore_tool_present': restore_tool.is_file(),
+                'backup_key_file': key_file, 'backup_key_available': bool(key_file),
+                'backup_ready': home.is_dir() and backup_tool.is_file() and restore_tool.is_file() and bool(key_file)}
     if action in {'start','stop','restart'}:
         execute(service_command + [action, service], timeout=60)
         result = subprocess.run(service_command + ['is-active', service], capture_output=True, text=True, timeout=15)

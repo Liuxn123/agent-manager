@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+from agent_manager import __version__
 
 
 def build_environment() -> dict[str, str]:
@@ -26,19 +28,26 @@ def build_environment() -> dict[str, str]:
 
 
 def main() -> None:
+    existing = ROOT / "dist/AgentManager"
+    if (existing / "data/manager.sqlite3").exists() or (existing / "backups").exists():
+        raise RuntimeError("Build output contains portable user data; move the whole folder to a separate location before rebuilding.")
     command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--onedir",
                "--name", "AgentManager", "--paths", str(ROOT / "src"), "--collect-submodules", "keyring.backends", "--collect-data", "agent_manager",
                "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build"), str(ROOT / "scripts/desktop_entry.py")]
     subprocess.run(command, cwd=ROOT, env=build_environment(), check=True)
     application = ROOT / "dist" / ("AgentManager.app" if sys.platform == "darwin" else "AgentManager")
+    portable_root = application.parent if sys.platform == "darwin" else application
+    (portable_root / "portable.json").write_text(json.dumps({"mode": "portable", "schema_version": 1}), encoding="utf-8")
     # A new staging directory prevents a removed DLL from surviving in a zip
     # produced by a subsequent build.
     with tempfile.TemporaryDirectory(prefix="package-", dir=ROOT / "build") as temporary:
         payload = Path(temporary)
         shutil.copytree(application, payload / application.name, symlinks=True)
+        if sys.platform == "darwin":
+            shutil.copy2(portable_root / "portable.json", payload / "portable.json")
         shutil.copy2(ROOT / "README.md", payload / "README.md")
         shutil.copy2(ROOT / "src/agent_manager/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
-        metadata = {"version": "0.2.0", "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version()}
+        metadata = {"version": __version__, "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version(), "data_mode": "portable"}
         (payload / "BUILD-INFO.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         name = ROOT / "dist" / f"AgentManager-{sys.platform}-{platform.machine()}"
         result = shutil.make_archive(str(name), "zip" if sys.platform == "win32" else "gztar", root_dir=payload)

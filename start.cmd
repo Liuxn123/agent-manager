@@ -1,6 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if exist "..\AgentManager-Portable\AgentManager.exe" (
+    start "" "..\AgentManager-Portable\AgentManager.exe"
+    exit /b
+)
 if exist "dist\AgentManager\AgentManager.exe" (
     start "" "dist\AgentManager\AgentManager.exe"
     exit /b

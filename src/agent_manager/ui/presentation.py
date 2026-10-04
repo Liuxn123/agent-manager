@@ -23,6 +23,10 @@ def readable_size(value: int) -> str:
 ACTION_LABELS = {"observe": "检查状态", "backup": "创建备份", "verify": "校验备份", "restore": "恢复", "open": "打开目录",
                  "versions": "备份提交列表", "start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "Git 拉取", "open_vault": "打开 Obsidian", "records": "浏览本地记录"}
 FIELD_LABELS = {"home": "运行目录", "home_present": "运行目录存在", "backup_repo": "备份仓库", "snapshot_present": "存在快照",
+    "observed_at": "最近检测时间", "memory_used_percent": "内存使用率（%）", "external_process_count": "原应用进程数量",
+    "backup_repo_present": "备份仓库存在", "backup_tool_present": "备份工具存在", "restore_tool_present": "恢复工具存在",
+    "backup_key_file": "服务器备份口令文件路径", "backup_key_available": "服务器备份口令文件存在", "backup_ready": "备份环境就绪",
+    "identical_files": "恢复后完全一致的文件数", "active_sessions": "活跃会话", "archived_sessions": "归档会话", "cron_files": "定时任务文件",
     "created_at": "备份时间", "counts": "资料数量", "sessions": "会话", "messages": "消息", "skills": "技能", "facts": "事实记忆",
     "format": "备份格式", "git_status": "Git 状态", "branch": "当前分支", "runtime_state": "运行状态", "connected": "连接成功",
     "service_state": "网关服务状态", "service_scope": "服务范围", "load_average": "系统负载", "cpu_count": "CPU 核心数",
@@ -67,4 +71,5 @@ def readable_report(report: Any, depth: int = 0) -> str:
         return "否"
     if report is None:
         return "未知 / 未提供"
-    return {"project": "项目文件", "records": "本地记录", "vault": "Obsidian 笔记库", "agent": "工作 Agent"}.get(str(report), str(report))
+    return {"project": "项目文件", "records": "本地记录", "vault": "Obsidian 笔记库", "agent": "工作 Agent",
+            "active": "运行中", "inactive": "已停止", "failed": "故障", "system": "系统服务", "unknown": "未知"}.get(str(report), str(report))

@@ -4,6 +4,8 @@ import base64
 import json
 import re
 import shlex
+import os
+import shutil
 from pathlib import Path
 
 from ..domain import Resource, RestorePlan, UserError
@@ -29,7 +31,11 @@ def ssh_command(resource: Resource, payload: dict) -> list[str]:
         raise UserError("SSH 端口必须是数字。") from exc
     if not 1 <= port <= 65535:
         raise UserError("SSH 端口超出范围。")
-    command = [str(options.get("ssh", "ssh")), "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+    executable = options.get("ssh") or shutil.which("ssh")
+    if not executable and os.name == "nt":
+        candidate = Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/OpenSSH/ssh.exe"
+        executable = str(candidate) if candidate.is_file() else None
+    command = [str(executable or "ssh"), "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-p", str(port)]
     if options.get("identity_file"):
         path = Path(options["identity_file"]).expanduser()
@@ -37,13 +43,43 @@ def ssh_command(resource: Resource, payload: dict) -> list[str]:
             raise UserError("SSH 私钥文件不存在。")
         command += ["-i", str(path)]
     if options.get("ssh_config"):
-        command += ["-F", str(Path(options["ssh_config"]).expanduser())]
+        path = Path(options["ssh_config"]).expanduser()
+        if not path.is_file():
+            raise UserError("SSH 配置文件不存在。")
+        command += ["-F", str(path)]
+    if user := str(options.get("user", "")).strip():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", user):
+            raise UserError("SSH 登录账号格式不正确。")
+        command += ["-l", user]
+    if options.get("known_hosts"):
+        path = Path(options["known_hosts"]).expanduser()
+        if not path.is_file():
+            raise UserError("主机指纹文件不存在，请先核对服务器指纹。")
+        command += ["-o", "UserKnownHostsFile=" + str(path)]
     encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
     python = str(options.get("python", "python3")).strip()
     if not python or python.startswith("-") or "\n" in python:
         raise UserError("远端 Python 配置无效。")
     command += [host, shlex.join([python, "-u", "-c", SERVER_PROGRAM, encoded])]
     return command
+
+
+def existing_connection() -> dict:
+    """Reuse public connection parameters, never import passwords or key content."""
+    mapping = {"host": "HOST", "user": "USER", "port": "PORT", "identity_file": "KEY_FILE",
+               "ssh_config": "SSH_CONFIG", "known_hosts": "KNOWN_HOSTS", "python": "PYTHON",
+               "home": "HERMES_HOME", "backup_repo": "BACKUP_REPO", "knowledge_repo": "KNOWLEDGE_REPO",
+               "run_user": "BACKUP_USER"}
+    values = {key: os.environ["HERMES_SERVER_" + suffix].strip() for key, suffix in mapping.items()
+              if os.environ.get("HERMES_SERVER_" + suffix)}
+    ssh_root = Path.home() / ".ssh"
+    for key, name in [("ssh_config", "config"), ("known_hosts", "known_hosts")]:
+        try:
+            if key not in values and (ssh_root / name).is_file():
+                values[key] = str(ssh_root / name)
+        except OSError:
+            continue
+    return values
 
 
 class ServerHermesAdapter:

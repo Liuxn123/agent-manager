@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QTextEdit, QVBoxLayout, QWidget, QListWidget, QGroupBox)
+    QTextEdit, QVBoxLayout, QWidget, QListWidget, QGroupBox, QSpinBox)
 
 from ..domain import KINDS, Resource, RestorePlan, UserError
 from ..security import safe_result
@@ -59,7 +59,9 @@ class ResourceDialog(QDialog):
         elif kind == "hermes_server":
             for key, label, default, chooser in [
                 ("host", "SSH 别名 / user@host", "", ""), ("port", "SSH 端口", "22", ""),
+                ("user", "SSH 登录账号（别名已配置可留空）", "", ""),
                 ("identity_file", "私钥文件（可选）", "", "file"), ("ssh_config", "SSH 配置（可选）", "", "file"),
+                ("known_hosts", "主机指纹文件（可选）", "", "file"),
                 ("python", "远端 Python", "python3", ""), ("home", "远端 Hermes 目录", "/home/hermes/.hermes", ""),
                 ("backup_repo", "远端备份仓库", "/home/hermes/hermes-server-backup", ""),
                 ("knowledge_repo", "远端知识库", "/home/hermes/hermes-knowledge-base", ""),
@@ -71,6 +73,14 @@ class ResourceDialog(QDialog):
             self.scope.addItem("用户服务", "user")
             self.scope.setCurrentIndex(1 if options.get("service_scope") == "user" else 0)
             self.form.addRow("服务范围", self.scope)
+            reuse = QPushButton("读取已有服务器连接参数")
+            def import_connection():
+                from ..adapters.server import existing_connection
+                for key, value in existing_connection().items():
+                    if key in self.fields:
+                        self.fields[key].setText(str(value))
+            reuse.clicked.connect(import_connection)
+            self.form.addRow("", reuse)
             note = "管理 Linux/systemd 服务器；使用 SSH Agent 或私钥，严格验证主机指纹。恢复只写入空目录，不自动启动网关。"
         else:
             self.add_field("path", "项目文件夹（Agent 可不填）" if kind == "agent" else "项目文件夹", options.get("path", ""), "dir")
@@ -114,6 +124,11 @@ class ResourceDialog(QDialog):
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
         layout.addWidget(hint)
+        if kind != "hermes_server":
+            self.automatic = QCheckBox("管家打开时，每天自动备份这项资料")
+            self.automatic.setChecked(bool(options.get("automatic_backup")))
+            self.automatic.setToolTip("需要已保存的备份口令；运行中的 Agent 将延后备份。旧版保留数量在设置中调整。")
+            layout.addWidget(self.automatic)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存资源")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
@@ -148,6 +163,9 @@ class ResourceDialog(QDialog):
             if not name:
                 raise UserError("请输入资源名称。")
             options = {**(self.original.options if self.original else {}), **values}
+            if self.kind != "hermes_server":
+                options["automatic_backup"] = self.automatic.isChecked()
+                options.setdefault("backup_interval_hours", 24)
             if self.kind == "hermes_server":
                 from ..adapters.server import ssh_command
                 options["port"] = int(options["port"])
@@ -220,7 +238,8 @@ class PasswordDialog(QDialog):
         if creating:
             form.addRow("再次输入", self.confirm)
         layout.addLayout(form)
-        self.remember = QCheckBox("保存至这台电脑的系统凭据存储")
+        portable = bool(getattr(getattr(parent, "store", None), "portable_root", None))
+        self.remember = QCheckBox("保存至加密便携口令库（先在设置中解锁）" if portable else "保存至这台电脑的系统凭据存储")
         layout.addWidget(self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("继续")

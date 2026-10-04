@@ -23,6 +23,7 @@ from .domain import Resource, RestorePlan, UserError
 from .runtime import TaskContext, run_process
 from .storage import now
 from .profiles import sources_for
+from .snapshots import snapshot_file, is_database_companion
 
 MAGIC = b"AGENT-MANAGER-1\n"
 CHUNK = 1024 * 1024
@@ -211,7 +212,7 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
     salt, nonce = os.urandom(16), os.urandom(12)
     encryptor = Cipher(algorithms.AES(key_for(password, salt)), modes.GCM(nonce)).encryptor()
     encryptor.authenticate_additional_data(MAGIC)
-    context.log(f"正在加密 {len(components)} 个资料目录，请保持原应用关闭。")
+    context.log(f"正在加密 {len(components)} 个资料目录；数据库使用一致性快照，普通文件需要保持稳定。")
     try:
         with temporary.open("xb") as handle:
             os.chmod(temporary, 0o600)
@@ -238,23 +239,28 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                             context.checkpoint()
                             path = current / name
                             relative = safe_name(prefix + "/" + path.relative_to(source).as_posix())
+                            if is_database_companion(path):
+                                excluded.append(relative)
+                                continue
                             if is_link(path) or not path.is_file():
                                 excluded.append(relative)
                                 continue
-                            before = path.stat()
-                            total += before.st_size
-                            if total > MAX_SIZE or len(records) >= MAX_FILES:
-                                raise UserError("资料超过 50 GiB 或 20 万文件，请拆分备份。")
-                            digest = hashlib.sha256()
-                            with path.open("rb") as reader, archive.open("files/" + relative, "w", force_zip64=True) as writer:
-                                for chunk in iter(lambda: reader.read(CHUNK), b""):
-                                    context.checkpoint()
-                                    digest.update(chunk)
-                                    writer.write(chunk)
-                            after = path.stat()
-                            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-                                raise UserError("文件在备份期间发生变化，请退出原应用后重新备份。")
-                            records.append({"path": relative, "sha256": digest.hexdigest(), "size": before.st_size, "mode": stat.S_IMODE(before.st_mode)})
+                            mode = stat.S_IMODE(path.stat().st_mode)
+                            with snapshot_file(path, context) as (read_path, database):
+                                before = read_path.stat()
+                                total += before.st_size
+                                if total > MAX_SIZE or len(records) >= MAX_FILES:
+                                    raise UserError("资料超过 50 GiB 或 20 万文件，请拆分备份。")
+                                digest = hashlib.sha256()
+                                with read_path.open("rb") as reader, archive.open("files/" + relative, "w", force_zip64=True) as writer:
+                                    for chunk in iter(lambda: reader.read(CHUNK), b""):
+                                        context.checkpoint()
+                                        digest.update(chunk)
+                                        writer.write(chunk)
+                                after = read_path.stat()
+                                if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                                    raise UserError("文件在备份期间发生变化，请退出原应用后重新备份。")
+                                records.append({"path": relative, "sha256": digest.hexdigest(), "size": before.st_size, "mode": mode, "database_snapshot": database})
                     if component["role"] == "project" and (source / ".git").exists():
                         with tempfile.TemporaryDirectory(prefix="agent-manager-history-") as folder:
                             bundle = Path(folder) / "history.bundle"

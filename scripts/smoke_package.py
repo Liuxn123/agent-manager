@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 
-def check_application(root: Path, payload: Path) -> None:
+def check_application(root: Path, payload: Path, portable: bool = False) -> None:
     if sys.platform == "win32":
         executable = payload / "AgentManager/AgentManager.exe"
     elif sys.platform == "darwin":
@@ -19,7 +19,9 @@ def check_application(root: Path, payload: Path) -> None:
         executable = payload / "AgentManager/AgentManager"
     screenshot = root / "build/smoke.png"
     screenshot.unlink(missing_ok=True)
-    command = [str(executable), "--data-dir", str(payload / "smoke-data"), "--smoke-test", "--screenshot", str(screenshot)]
+    command = [str(executable), "--smoke-test", "--screenshot", str(screenshot)]
+    if not portable:
+        command += ["--data-dir", str(payload / "smoke-data")]
     process = subprocess.Popen(command, env={**os.environ, "QT_QPA_PLATFORM": "offscreen"}, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     try:
@@ -38,6 +40,10 @@ def check_application(root: Path, payload: Path) -> None:
             print(error.read_text(encoding="utf-8"))
         raise SystemExit("Frozen application startup failed")
     print("Extracted package opened, rendered and exited successfully")
+    if portable:
+        portable_root = payload if sys.platform == "darwin" else payload / "AgentManager"
+        if not (portable_root / "data/manager.sqlite3").is_file():
+            raise SystemExit("Portable package wrote its data outside the application folder")
 
 
 def main() -> None:
@@ -45,7 +51,8 @@ def main() -> None:
     extension = ".zip" if sys.platform == "win32" else ".tar.gz"
     package = root / "dist" / f"AgentManager-{sys.platform}-{platform.machine()}{extension}"
     with tempfile.TemporaryDirectory(prefix="smoke-extract-", dir=root / "build") as temporary:
-        payload = Path(temporary)
+        payload = Path(temporary) / "original"
+        payload.mkdir()
         if sys.platform == "win32":
             with zipfile.ZipFile(package) as archive:
                 archive.extractall(payload)
@@ -53,6 +60,11 @@ def main() -> None:
             with tarfile.open(package, "r:gz") as archive:
                 archive.extractall(payload, filter="data")
         check_application(root, payload)
+        check_application(root, payload, portable=True)
+        moved = Path(temporary) / "moved-folder"
+        payload.rename(moved)
+        check_application(root, moved, portable=True)
+        print("Portable package kept its data after moving the entire folder")
 
 
 if __name__ == "__main__":

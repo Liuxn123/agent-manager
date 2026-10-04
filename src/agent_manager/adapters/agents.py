@@ -24,11 +24,29 @@ class AgentAdapter:
         with self._lock:
             process = self._processes.get(resource.id)
             running = bool(process and process.poll() is None)
+        external = self.external_pids(resource)
         return {"engine": resource.options.get("engine", "通用 Agent"), "components": [
                 {"label": item["label"], "path": item["path"], "exists": bool(item["path"] and Path(item["path"]).is_dir())} for item in components],
-                "state": "本工具启动的进程正在运行" if running else "没有本工具管理中的进程；外部进程状态未知",
+                "state": "本工具启动的进程正在运行" if running else "发现原应用正在运行" if external else "未发现已识别的进程",
+                "external_process_count": len(external),
                 "pid": process.pid if running else None,
                 "note": RECORD_NOTE}
+
+    def external_pids(self, resource: Resource) -> list[int]:
+        import psutil
+        from pathlib import Path
+        names = {"Codex": {"codex", "codex.exe"}, "WorkBuddy": {"workbuddy", "workbuddy.exe"},
+                 "CodeBuddy": {"codebuddy", "codebuddy.exe"}, "Claude Code": {"claude", "claude.exe"}}.get(resource.options.get("engine"), set())
+        if executable := resource.options.get("executable"):
+            names = names | {Path(executable).name.casefold()}
+        matches = []
+        for process in psutil.process_iter(["pid", "name"]):
+            try:
+                if str(process.info["name"]).casefold() in names:
+                    matches.append(process.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return matches
 
     def is_running(self, resource: Resource) -> bool:
         with self._lock:

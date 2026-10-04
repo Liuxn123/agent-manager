@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .domain import Resource, UserError
+from .portable import portable_directory, encode_paths, decode_paths
 
 
 def now() -> str:
@@ -19,6 +20,8 @@ def now() -> str:
 def data_directory() -> Path:
     if override := os.environ.get("AGENT_MANAGER_DATA_DIR"):
         return Path(override).expanduser().resolve()
+    if portable := portable_directory():
+        return portable / "data"
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "AgentManager"
     if sys.platform == "darwin":
@@ -44,12 +47,14 @@ def validate_public_config(value: Any) -> None:
 class Store:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or data_directory()).resolve()
+        self.portable_root = self.root.parent if (self.root.parent / "portable.json").is_file() else None
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "manager.sqlite3"
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, document TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS evidence (key TEXT PRIMARY KEY, document TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, resource_id TEXT, title TEXT, state TEXT,
                     started_at TEXT, finished_at TEXT, log TEXT, result TEXT
@@ -69,13 +74,13 @@ class Store:
 
     def resources(self) -> list[Resource]:
         with self.connect() as db:
-            return [Resource.from_dict(json.loads(row[0])) for row in db.execute("SELECT document FROM resources ORDER BY rowid")]
+            return [Resource.from_dict(decode_paths(json.loads(row[0]), self.portable_root)) for row in db.execute("SELECT document FROM resources ORDER BY rowid")]
 
     def save_resource(self, resource: Resource) -> None:
         Resource.from_dict(resource.to_dict())
         validate_public_config(resource.options)
         with self.connect() as db:
-            db.execute("INSERT OR REPLACE INTO resources VALUES (?, ?)", (resource.id, json.dumps(resource.to_dict(), ensure_ascii=False)))
+            db.execute("INSERT OR REPLACE INTO resources VALUES (?, ?)", (resource.id, json.dumps(encode_paths(resource.to_dict(), self.portable_root), ensure_ascii=False)))
 
     def remove_resource(self, identity: str) -> None:
         with self.connect() as db:
@@ -84,12 +89,24 @@ class Store:
     def setting(self, key: str, default: Any = None) -> Any:
         with self.connect() as db:
             row = db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        return json.loads(row[0]) if row else default
+        return decode_paths(json.loads(row[0]), self.portable_root) if row else default
 
     def set_setting(self, key: str, value: Any) -> None:
         validate_public_config({key: value})
         with self.connect() as db:
-            db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, json.dumps(value, ensure_ascii=False)))
+            db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, json.dumps(encode_paths(value, self.portable_root), ensure_ascii=False)))
+
+    def evidence(self, key: str) -> dict:
+        key = str(encode_paths(key, self.portable_root))
+        with self.connect() as db:
+            row = db.execute("SELECT document FROM evidence WHERE key=?", (key,)).fetchone()
+        return decode_paths(json.loads(row[0]), self.portable_root) if row else {}
+
+    def save_evidence(self, key: str, report: dict) -> None:
+        from .security import safe_result
+        key = str(encode_paths(key, self.portable_root))
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO evidence VALUES (?, ?)", (key, json.dumps(encode_paths(safe_result(report), self.portable_root), ensure_ascii=False)))
 
     def export_config(self, destination: Path) -> None:
         payload = {"schema_version": 1, "resources": [r.to_dict() for r in self.resources()]}
@@ -109,7 +126,7 @@ class Store:
         with self.connect() as db:
             count = 0
             for resource in resources:
-                count += db.execute("INSERT OR IGNORE INTO resources VALUES (?, ?)", (resource.id, json.dumps(resource.to_dict(), ensure_ascii=False))).rowcount
+                count += db.execute("INSERT OR IGNORE INTO resources VALUES (?, ?)", (resource.id, json.dumps(encode_paths(resource.to_dict(), self.portable_root), ensure_ascii=False))).rowcount
         return count
 
     def recover_interrupted(self) -> None:
