@@ -39,7 +39,7 @@ def snapshot_token(repo: Path) -> str:
 
 
 class LocalHermesAdapter:
-    capabilities = frozenset({"observe", "backup", "verify", "restore", "open", "versions", "start", "stop"})
+    capabilities = frozenset({"observe", "backup", "verify", "restore", "open", "versions", "start", "stop", "library"})
 
     def __init__(self) -> None:
         from .agents import AgentAdapter
@@ -56,6 +56,10 @@ class LocalHermesAdapter:
 
     def running_ids(self) -> list[str]:
         return self.processes.running_ids()
+
+    def library(self, resource: Resource, context: TaskContext) -> dict:
+        from ..hermes_library import list_library
+        return list_library(resource, context)
 
     def _base(self, resource: Resource) -> tuple[list[str], Path, Path]:
         repo = required_directory(resource.options, "backup_repo")

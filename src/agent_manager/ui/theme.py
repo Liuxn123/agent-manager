@@ -68,6 +68,8 @@ QTabBar::tab { padding: 9px 12px; color: #8490aa; border-bottom: 2px solid trans
 QTabBar::tab:selected { color: #5368c5; border-bottom: 2px solid #5368c5; }
 QSplitter::handle { background: transparent; width: 12px; height: 12px; }
 QFrame#TrendBar { background: #9dadE9; border-radius: 3px; }
+QFrame#DirectoryCard { background: #ffffff; border: 1px solid #e2e7f1; border-radius: 8px; }
+QTextEdit#DirectoryPath { border: none; padding: 0px; background: transparent; color: #394f92; }
 QToolTip { background: #24314f; color: #ffffff; border: none; padding: 6px; }
 QWidget#SettingsBody { background: #f5f6fb; }
 QWidget#SettingsPage QLabel#Title { font-size: 22px; }

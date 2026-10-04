@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': "仓库分工：myself 沿用自己的独立 Git；普通项目和 Agent 项目不再检查 Git 或打包提交历史。仅明确启用独立 Git 管理的知识库保留原有历史备份能力，旧历史包仍可恢复。\n\n新增“备份与换电脑 → 整理 Agent 备份”：将已校验的 Codex、WorkBuddy、CodeBuddy、Claude Code 等加密 .amb 副本按类型和编号归入专用 agent-backups 仓库，索引不含本机路径、聊天正文或口令。重复整理不会重复复制；未校验、被修改、同名冲突、链接与越界路径会跳过或停止，原副本保留。只更新本地仓库，提交和推送使用现有 Git 工具。单包限 50 MiB，较大备份继续用便携 backups/U 盘携带。\n\n设置保持精简，使用说明已更新。程序源码、myself、Hermes 原生备份、其他 Agent 记录仓库各自独立；旧 workbench 源码保留。四个平台执行测试、打包及解压启动和便携迁移验证。"})
+            'body': "管理页优化：资源名称与长路径完整换行，按实际文字高度调整行高，操作按钮随窗口宽度换行。“恢复…”改为“恢复备份”。新增完整目录查看、复制与本地文件夹快捷入口，所选资源的最近操作和活动记录筛选。\n\n本地 Hermes 新增“会话与技能”：搜索近期会话标题与来源、查看最近用户/助手消息，搜索和阅读 SKILL.md。服务器新增“网关日志”，通过已有 SSH 读取登记的 systemd 服务最近 80 行；其他工作 Agent 新增直接搜索记录入口。查看内容不保存到管家任务结果，原有备份、恢复、规范项目与 Obsidian 管理流程保留。\n\n便携模式与简洁设置保留，使用说明已更新。Windows、Linux、macOS Apple Silicon 与 Intel 构建均执行测试、打包、解压启动及便携迁移验证。"})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

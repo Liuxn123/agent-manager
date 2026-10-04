@@ -108,6 +108,11 @@ class ApplicationService:
         with self.locks.acquire(keys):
             return organize(self.store, self.backup_root(), repository, context)
 
+    def read_hermes_item(self, resource: Resource, category: str, identity: str, context: TaskContext) -> dict:
+        from .hermes_library import read_item
+        with self.locks.acquire(self.lock_keys(resource)):
+            return read_item(resource, category, identity, context)
+
     def rehearse(self, resource: Resource, source: Path, password: str, context: TaskContext) -> dict:
         report = self.verify_backup(source, password, context)
         directory = self.store.root / "rehearsals"

@@ -83,13 +83,13 @@ def existing_connection() -> dict:
 
 
 class ServerHermesAdapter:
-    capabilities = frozenset({"observe", "backup", "verify", "restore", "start", "stop", "restart"})
+    capabilities = frozenset({"observe", "backup", "verify", "restore", "start", "stop", "restart", "logs"})
 
     def _run(self, resource: Resource, action: str, context: TaskContext, **extra) -> dict:
         payload = {**resource.options, "action": action, **extra}
         command = ssh_command(resource, payload)
         report = json_result(run_process(command, context, timeout=1900 if action in {"backup", "restore"} else 600,
-                                         cancellable=action in {"observe", "verify", "plan_restore"}))
+                                         cancellable=action in {"observe", "verify", "plan_restore", "logs"}))
         if report.get("ok") is not True:
             code = report.get("error", "unknown")
             raise UserError(ERRORS.get(code, f"服务器操作未完成（{code}）。请检查目录、工具依赖、运行账号和权限。"))
@@ -97,6 +97,11 @@ class ServerHermesAdapter:
 
     def observe(self, resource: Resource, context: TaskContext) -> dict:
         return self._run(resource, "observe", context)
+
+    def logs(self, resource: Resource, context: TaskContext) -> dict:
+        from ..security import redact
+        result = self._run(resource, "logs", context)
+        return {"text": redact(str(result.get("text", ""))), "note": "最近 80 行网关日志，只读查看，不写入管家任务结果。"}
 
     def backup(self, resource: Resource, context: TaskContext) -> dict:
         return self._run(resource, "backup", context)

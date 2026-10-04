@@ -9,12 +9,12 @@ from uuid import uuid4
 from datetime import datetime
 
 from PySide6.QtCore import QThreadPool, QTimer, Qt, QUrl, QUrlQuery, QSize
-from PySide6.QtGui import QDesktopServices, QColor
+from PySide6.QtGui import QDesktopServices, QColor, QTextOption
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
     QMainWindow, QMenu, QMessageBox, QPushButton, QProgressBar, QSplitter, QStackedWidget,
     QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget, QScrollArea,
-    QTabWidget, QListWidgetItem, QSpinBox, QToolButton, QFormLayout)
+    QTabWidget, QListWidgetItem, QSpinBox, QToolButton, QFormLayout, QSizePolicy, QComboBox, QApplication)
 
 from .. import __version__, archives
 from ..application import ApplicationService
@@ -25,7 +25,7 @@ from .dialogs import ArchiveRestoreDialog, PasswordDialog, PlanDialog, ResourceD
 from ..profiles import restored_resource, sources_for
 from .tasks import Worker
 from .presentation import ACTION_LABELS, readable_report, readable_time, readable_size
-from .components import nav_icon, card
+from .components import nav_icon, card, FlowLayout, ReadableTable
 from ..maintenance import backup_health, activity_summary, is_due, fingerprint, age_hours
 from ..storage import now
 
@@ -35,12 +35,13 @@ STATE_LABELS = {"running": "运行中", "success": "已完成", "failed": "失�
 def button(text: str, callback, primary: bool = False) -> QPushButton:
     widget = QPushButton(text)
     widget.setProperty("primary", primary)
+    widget.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
     widget.clicked.connect(callback)
     return widget
 
 
 def table(headers: list[str]) -> QTableWidget:
-    widget = QTableWidget(0, len(headers))
+    widget = ReadableTable(0, len(headers))
     widget.setHorizontalHeaderLabels(headers)
     widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -49,7 +50,6 @@ def table(headers: list[str]) -> QTableWidget:
     widget.verticalHeader().hide()
     widget.verticalHeader().setDefaultSectionSize(42)
     widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-    widget.setWordWrap(False)
     widget.setShowGrid(False)
     return widget
 
@@ -83,11 +83,11 @@ class ResourcePage(QWidget):
         toolbar.addWidget(self.search)
         toolbar.addWidget(button("编辑", lambda: window.edit_resource(self.selected())))
         layout.addLayout(toolbar)
-        actions = QHBoxLayout()
+        actions = FlowLayout()
         self.observe_button = button("检查状态", lambda: self.dispatch("observe"))
         self.backup_button = button("立即备份", lambda: self.dispatch("backup"), True)
         self.verify_button = button("校验备份", lambda: self.dispatch("verify"))
-        self.restore_button = button("恢复…", lambda: self.dispatch("restore"))
+        self.restore_button = button("恢复备份", lambda: self.dispatch("restore"))
         self.more_button = button("更多操作", self.more)
         self.records_button = button("浏览本地记录", lambda: self.dispatch("records"))
         if kinds == ["agent"]:
@@ -95,19 +95,41 @@ class ResourcePage(QWidget):
         self.verify_button.hide()
         for widget in [self.observe_button, self.backup_button, self.restore_button, self.more_button]:
             actions.addWidget(widget)
-        actions.addStretch()
+        self.library_button = button("会话与技能", lambda: self.dispatch("library"))
+        self.logs_button = button("网关日志", lambda: self.dispatch("logs"))
+        self.search_records_button = button("搜索记录", lambda: self.window.search_records(self.selected()))
+        if kinds == ["hermes_local"]:
+            actions.addWidget(self.library_button)
+        elif kinds == ["hermes_server"]:
+            actions.addWidget(self.logs_button)
+        elif kinds == ["agent"]:
+            actions.addWidget(self.search_records_button)
         layout.addLayout(actions)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.resources_table = table(["名称", "类型", "位置", "状态"])
         self.resources_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.resources_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.resources_table.setColumnWidth(0, 200)
+        self.resources_table.setColumnHidden(1, len(kinds) == 1)
+        self.resources_table.setMinimumWidth(340)
         self.resources_table.itemSelectionChanged.connect(self.selection_changed)
-        self.resources_table.doubleClicked.connect(lambda index: self.dispatch("observe"))
+        self.resources_table.doubleClicked.connect(lambda index: self.show_paths())
         split.addWidget(self.resources_table)
         tabs = QTabWidget()
         self.details = text_view()
         self.technical_details = text_view()
         self.details.setMinimumWidth(240)
         tabs.addTab(self.details, "概览")
+        self.tabs = tabs
+        self.paths_page = QWidget()
+        self.paths_layout = QVBoxLayout(self.paths_page)
+        self.paths_layout.setContentsMargins(8, 8, 8, 8)
+        paths_scroll = QScrollArea()
+        paths_scroll.setWidgetResizable(True)
+        paths_scroll.setWidget(self.paths_page)
+        tabs.addTab(paths_scroll, "目录与操作")
+        self.recent_details = text_view()
+        tabs.addTab(self.recent_details, "最近操作")
         tabs.addTab(self.technical_details, "配置与诊断")
         split.addWidget(tabs)
         split.setSizes([650, 360])
@@ -154,12 +176,15 @@ class ResourcePage(QWidget):
     def selection_changed(self) -> None:
         resource = self.selected()
         enabled = bool(resource and not self.window.is_busy(resource.id))
-        for widget in [self.observe_button, self.backup_button, self.verify_button, self.restore_button, self.more_button]:
+        for widget in [self.observe_button, self.backup_button, self.verify_button, self.restore_button, self.more_button,
+                       self.library_button, self.logs_button, self.search_records_button]:
             widget.setEnabled(enabled)
         self.records_button.setEnabled(enabled)
         if not resource:
             self.details.setPlainText("选择一个资源，查看状态和可用操作。")
             self.technical_details.clear()
+            self.recent_details.clear()
+            self.populate_paths(None)
             return
         observation = self.window.observations.get(resource.id)
         capabilities = self.window.service.registry.get(resource).capabilities
@@ -194,6 +219,54 @@ class ResourcePage(QWidget):
         policy_note = "手动按需备份 · 不自动连接服务器" if resource.kind == "hermes_server" else "每天自动备份 · 管家打开时生效" if resource.options.get("automatic_backup") else "自动备份未开启 · 可在编辑中设置"
         summary += "<hr><p style='color:#7a849c'>" + policy_note + "</p>"
         self.details.setHtml(summary)
+        tasks = self.window.store.tasks(limit=5, resource_id=resource.id)
+        self.recent_details.setPlainText("\n\n".join(readable_time(task['started_at']) + " · " + STATE_LABELS.get(task['state'], task['state']) + "\n" + task['title'] for task in tasks) or "这项资料还没有操作记录。检查状态、备份或恢复后，会显示在这里。")
+        self.populate_paths(resource)
+
+    def show_paths(self) -> None:
+        self.tabs.setCurrentIndex(1)
+
+    def populate_paths(self, resource: Resource | None) -> None:
+        while item := self.paths_layout.takeAt(0):
+            if widget := item.widget():
+                widget.deleteLater()
+        if resource is None:
+            self.paths_layout.addWidget(QLabel("选中资料后显示完整目录和快捷操作。"))
+            return
+        title = QLabel(resource.name)
+        title.setWordWrap(True)
+        title.setObjectName("SectionTitle")
+        self.paths_layout.addWidget(title)
+        if resource.kind == "agent":
+            paths = [(item["label"], item["path"]) for item in sources_for(resource)]
+        else:
+            paths = [(label, str(resource.options.get(key, ""))) for key, label in
+                     (("home", "运行目录"), ("path", "项目目录"), ("backup_repo", "备份仓库"), ("workspace", "Workspace"), ("knowledge_repo", "知识库"))]
+        for label, path in paths:
+            if not path:
+                continue
+            panel = QFrame()
+            panel.setObjectName("DirectoryCard")
+            content = QVBoxLayout(panel)
+            content.addWidget(QLabel(label))
+            view = QTextEdit()
+            view.setObjectName("DirectoryPath")
+            view.setReadOnly(True)
+            view.setPlainText(path)
+            view.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+            view.setMinimumHeight(52)
+            view.setMaximumHeight(90)
+            view.setToolTip(path)
+            content.addWidget(view)
+            controls = QHBoxLayout()
+            controls.addWidget(button("复制路径", lambda checked=False, path=path: QApplication.clipboard().setText(path)))
+            if resource.kind != "hermes_server":
+                controls.addWidget(button("打开目录", lambda checked=False, path=path: self.window.open_path(Path(path))))
+            controls.addStretch()
+            content.addLayout(controls)
+            self.paths_layout.addWidget(panel)
+        self.paths_layout.addWidget(button("查看全部操作记录", lambda: self.window.show_resource_activity(resource)))
+        self.paths_layout.addStretch()
 
     def dispatch(self, action: str) -> None:
         self.window.perform(self.selected(), action)
@@ -460,6 +533,10 @@ class MainWindow(QMainWindow):
         hint.setObjectName("Subtitle")
         layout.addWidget(hint)
         bar = QHBoxLayout()
+        self.task_filter = QComboBox()
+        self.task_filter.setMaximumWidth(300)
+        self.task_filter.currentIndexChanged.connect(self.refresh_tasks)
+        bar.addWidget(self.task_filter)
         bar.addWidget(button("刷新", self.refresh_tasks))
         bar.addWidget(button("请求取消选中任务", self.cancel_task))
         bar.addStretch()
@@ -831,6 +908,16 @@ class MainWindow(QMainWindow):
             self.submit(resource, resource.name + " · 查找本地记录", lambda context: list_records(resource, context),
                         lambda report: RecordsDialog(self, resource, report).exec())
             return
+        if action == "library":
+            from .library import HermesLibraryDialog
+            self.submit(resource, resource.name + " · 查看会话与技能", lambda context: self.service.action(resource, "library", context),
+                        lambda report: HermesLibraryDialog(self, resource, report).exec(), persist_result=False)
+            return
+        if action == "logs":
+            from .library import TextReportDialog
+            self.submit(resource, resource.name + " · 查看网关日志", lambda context: self.service.action(resource, "logs", context),
+                        lambda report: TextReportDialog(self, resource.name + " · 网关日志", report).exec(), persist_result=False)
+            return
         if action == "observe":
             def observed(report):
                 self.observations[resource.id] = safe_result(report)
@@ -977,9 +1064,18 @@ class MainWindow(QMainWindow):
     def refresh_tasks(self) -> None:
         if not hasattr(self, "task_table"):
             return
+        resource_id = self.task_filter.currentData()
+        self.task_filter.blockSignals(True)
+        self.task_filter.clear()
+        self.task_filter.addItem("全部资源", None)
+        for resource in self.store.resources():
+            self.task_filter.addItem(resource.name, resource.id)
+            self.task_filter.setItemData(self.task_filter.count() - 1, resource.name, Qt.ItemDataRole.ToolTipRole)
+        self.task_filter.setCurrentIndex(max(0, self.task_filter.findData(resource_id)))
+        self.task_filter.blockSignals(False)
         previous = self.task_table.currentRow()
         selected = self.task_rows[previous]["id"] if 0 <= previous < len(self.task_rows) else None
-        self.task_rows = self.store.tasks()
+        self.task_rows = self.store.tasks(resource_id=self.task_filter.currentData())
         self.task_table.blockSignals(True)
         self.task_table.setRowCount(len(self.task_rows))
         for row, task in enumerate(self.task_rows):
@@ -993,11 +1089,18 @@ class MainWindow(QMainWindow):
         self.task_table.blockSignals(False)
         self.task_details()
 
+    def show_resource_activity(self, resource: Resource) -> None:
+        self.navigation.setCurrentRow(6)
+        self.task_filter.setCurrentIndex(self.task_filter.findData(resource.id))
+        self.refresh_tasks()
+
     def task_details(self) -> None:
         row = self.task_table.currentRow()
         if 0 <= row < len(self.task_rows):
             task = self.task_rows[row]
             self.task_detail.setPlainText(task["log"] + "\n结果\n" + readable_report(json.loads(task["result"])))
+        else:
+            self.task_detail.clear()
 
     def cancel_task(self) -> None:
         row = self.task_table.currentRow()

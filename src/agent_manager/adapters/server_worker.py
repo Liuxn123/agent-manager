@@ -37,7 +37,7 @@ def token(repo):
 
 def main(config):
     action = config['action']
-    if action not in {'observe', 'backup', 'verify', 'plan_restore', 'restore', 'start', 'stop', 'restart'}:
+    if action not in {'observe', 'backup', 'verify', 'plan_restore', 'restore', 'start', 'stop', 'restart', 'logs'}:
         raise RuntimeError('unsupported_action')
     repo = Path(config['backup_repo'])
     home = Path(config['home'])
@@ -49,6 +49,10 @@ def main(config):
     if scope not in {'user', 'system'}:
         raise RuntimeError('invalid_scope')
     service_command = ['systemctl'] + (['--user'] if scope == 'user' else [])
+    if action == 'logs':
+        command = ['journalctl'] + (['--user'] if scope == 'user' else [])
+        text = execute(command + ['--no-pager', '-n', '80', '-u', service, '-o', 'short-iso'], timeout=30)
+        return {'text': text[-40000:]}
     if action == 'observe':
         result = subprocess.run(service_command + ['is-active', service], capture_output=True, text=True, timeout=15)
         state = result.stdout.strip()

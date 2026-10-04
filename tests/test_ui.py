@@ -6,18 +6,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile
 import time
 import unittest
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton, QTextEdit
 
 from agent_manager.domain import KINDS, Resource
 from agent_manager.storage import Store
 from agent_manager.ui.dialogs import ResourceDialog
 from agent_manager.ui.theme import setup_theme
 from agent_manager.ui.window import MainWindow
+from agent_manager.ui.library import HermesLibraryDialog
+from agent_manager.runtime import TaskContext
 
 
 class UITests(unittest.TestCase):
@@ -89,6 +93,67 @@ class UITests(unittest.TestCase):
         task = self.store.tasks()[0]
         self.assertEqual(task["state"], "success")
         self.assertNotIn("fixture-private-conversation", task["result"] + task["log"])
+
+    def test_management_labels_wrap_paths_are_complete_and_actions_do_not_overlap(self):
+        location = str(self.root / ("带有较长名称的资料目录" * 8))
+        resource = Resource("本机 Hermes · " + "需要完整显示的资源名称" * 4, "hermes_local", {"home": location})
+        self.store.save_resource(resource)
+        self.window.refresh_resources()
+        self.window.navigation.setCurrentRow(1)
+        page = self.window.resource_pages[0]
+        for width in (960, 1280):
+            self.window.resize(width, 700)
+            QTest.qWait(120)
+            self.assertEqual(page.restore_button.text(), "恢复备份")
+            self.assertEqual(page.resources_table.textElideMode(), Qt.TextElideMode.ElideNone)
+            self.assertGreater(page.resources_table.rowHeight(0), 45)
+            controls = [page.observe_button, page.backup_button, page.restore_button, page.more_button, page.library_button]
+            for first in controls:
+                self.assertGreaterEqual(first.width(), first.sizeHint().width())
+                self.assertLessEqual(first.geometry().right(), page.width())
+                for second in controls:
+                    if first is not second:
+                        self.assertFalse(first.geometry().intersects(second.geometry()))
+        page.show_paths()
+        fields = page.paths_page.findChildren(QTextEdit, "DirectoryPath")
+        self.assertIn(location, [field.toPlainText() for field in fields])
+        copy = next(widget for widget in page.paths_page.findChildren(QPushButton) if widget.text() == "复制路径")
+        copy.click()
+        self.assertEqual(self.app.clipboard().text(), location)
+
+    def test_resource_activity_filter_does_not_mix_resources(self):
+        first = Resource("第一个项目", "project", {"path": str(self.root)})
+        second = Resource("第二个项目", "project", {"path": str(self.root)})
+        for resource in (first, second):
+            self.store.save_resource(resource)
+            self.store.start_task(resource.id, resource.id, resource.name + " · 检查")
+        self.window.refresh_resources()
+        self.window.show_resource_activity(first)
+        self.assertEqual([row["resource_id"] for row in self.window.task_rows], [first.id])
+        self.window.task_filter.setCurrentIndex(0)
+        self.assertEqual(len(self.window.task_rows), 2)
+
+    def test_hermes_dialog_reads_selected_content_without_persisting_conversations(self):
+        resource = Resource("测试 Hermes", "hermes_local", {"home": str(self.root)})
+        self.store.save_resource(resource)
+        with closing(sqlite3.connect(self.root / "state.db")) as db, db:
+            db.executescript("CREATE TABLE sessions(id TEXT,title TEXT,started_at REAL);"
+                             "CREATE TABLE messages(id INTEGER,session_id TEXT,role TEXT,content TEXT);"
+                             "INSERT INTO sessions VALUES('sample','测试会话',1);"
+                             "INSERT INTO messages VALUES(1,'sample','user','fixture-private-Hermes-message');")
+        report = self.window.service.action(resource, "library", TaskContext())
+        dialog = HermesLibraryDialog(self.window, resource, report)
+        dialog.show()
+        dialog.tables["session"].selectRow(0)
+        with patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
+            deadline = time.monotonic() + 10
+            while "fixture-private-Hermes-message" not in dialog.preview.toPlainText() and time.monotonic() < deadline:
+                QTest.qWait(20)
+                time.sleep(0.005)
+            self.assertFalse(warnings.called)
+        self.assertIn("fixture-private-Hermes-message", dialog.preview.toPlainText())
+        self.assertNotIn("fixture-private-Hermes-message", str(self.store.tasks()))
+        dialog.reject()
 
     def test_agent_repository_button_runs_background_job_and_vault_git_is_explicit(self):
         repository = self.root / "agent-backups"

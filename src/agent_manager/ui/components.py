@@ -1,9 +1,122 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+import math
+
+from PySide6.QtCore import QByteArray, Qt, QRect, QSize, QPoint, QTimer
+from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextDocument, QTextOption, QAbstractTextDocumentLayout, QPalette
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QLayout, QTableWidget, QStyledItemDelegate, QStyleOptionViewItem, QStyle
+
+
+class WrappingDelegate(QStyledItemDelegate):
+    """Use the same text layout for painting and measuring unbroken paths."""
+    def document(self, option, index):
+        self.initStyleOption(option, index)
+        document = QTextDocument()
+        document.setDefaultFont(option.font)
+        document.setDocumentMargin(0)
+        settings = QTextOption()
+        settings.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        document.setDefaultTextOption(settings)
+        document.setPlainText(option.text)
+        document.setTextWidth(max(20, self.parent().columnWidth(index.column()) - 16))
+        return document
+
+    def sizeHint(self, option, index):
+        document = self.document(QStyleOptionViewItem(option), index)
+        return QSize(self.parent().columnWidth(index.column()), max(42, math.ceil(document.size().height()) + 12))
+
+    def paint(self, painter, option, index):
+        prepared = QStyleOptionViewItem(option)
+        document = self.document(prepared, index)
+        prepared.text = ""
+        prepared.widget.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, prepared, painter, prepared.widget)
+        context = QAbstractTextDocumentLayout.PaintContext()
+        context.palette = prepared.palette
+        if prepared.state & QStyle.StateFlag.State_Selected:
+            context.palette.setColor(QPalette.ColorRole.Text, prepared.palette.color(QPalette.ColorRole.HighlightedText))
+        rectangle = prepared.rect.adjusted(8, 6, -8, -6)
+        painter.save()
+        painter.setClipRect(rectangle)
+        painter.translate(rectangle.topLeft())
+        document.documentLayout().draw(painter, context)
+        painter.restore()
+
+
+class FlowLayout(QLayout):
+    """Keep action labels intact and wrap actions when a window gets narrow."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.items = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(8)
+
+    def addItem(self, item):
+        self.items.append(item)
+
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, index):
+        return self.items[index] if 0 <= index < len(self.items) else None
+
+    def takeAt(self, index):
+        return self.items.pop(index) if 0 <= index < len(self.items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.arrange(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rectangle):
+        super().setGeometry(rectangle)
+        self.arrange(rectangle, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.items:
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def arrange(self, rectangle, measuring):
+        x, y, height = rectangle.x(), rectangle.y(), 0
+        for item in self.items:
+            size = item.sizeHint().expandedTo(item.minimumSize())
+            if x > rectangle.x() and x + size.width() > rectangle.right() + 1:
+                x = rectangle.x()
+                y += height + self.spacing()
+                height = 0
+            if not measuring:
+                item.setGeometry(QRect(QPoint(x, y), size))
+            x += size.width() + self.spacing()
+            height = max(height, size.height())
+        return y + height - rectangle.y()
+
+
+class ReadableTable(QTableWidget):
+    """Wrap cell text and recompute row height after columns or the view resize."""
+    def __init__(self, rows, columns):
+        super().__init__(rows, columns)
+        self.setWordWrap(True)
+        self.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.setItemDelegate(WrappingDelegate(self))
+        self.row_timer = QTimer(self)
+        self.row_timer.setSingleShot(True)
+        self.row_timer.timeout.connect(self.resizeRowsToContents)
+        self.horizontalHeader().sectionResized.connect(lambda *_: self.row_timer.start(30))
+        self.model().rowsInserted.connect(lambda *_: self.row_timer.start(30))
+        self.model().dataChanged.connect(lambda *_: self.row_timer.start(30))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.row_timer.start(30)
 
 PATHS = [
     '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',

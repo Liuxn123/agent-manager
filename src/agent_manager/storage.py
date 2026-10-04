@@ -145,6 +145,8 @@ class Store:
         with self.connect() as db:
             db.execute("UPDATE tasks SET state=?, finished_at=?, result=? WHERE id=?", (state, now(), json.dumps(result, ensure_ascii=False), identity))
 
-    def tasks(self, limit: int = 100) -> list[dict[str, Any]]:
+    def tasks(self, limit: int = 100, resource_id: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as db:
+            if resource_id is not None:
+                return [dict(row) for row in db.execute("SELECT * FROM tasks WHERE resource_id=? ORDER BY rowid DESC LIMIT ?", (resource_id, limit))]
             return [dict(row) for row in db.execute("SELECT * FROM tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
