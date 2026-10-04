@@ -29,7 +29,7 @@ class ManagementUITests(unittest.TestCase):
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.store = Store(self.root / "data")
         self.window = MainWindow(self.store)
         self.window.show()
@@ -60,9 +60,9 @@ class ManagementUITests(unittest.TestCase):
         destination.mkdir()
         with patch("agent_manager.ui.window.QFileDialog.getExistingDirectory", return_value=str(destination)):
             self.window.change_backup_location()
-        self.assertEqual(self.window.service.backup_root(), destination)
+        self.assertEqual(self.window.service.backup_root().resolve(), destination.resolve())
         self.assertEqual((old_root / "existing.amb").read_bytes(), b"fixture-existing-backup")
-        self.assertIn(str(destination), self.window.backup_location.toPlainText())
+        self.assertIn(str(destination.resolve()), self.window.backup_location.toPlainText())
         self.window.settings_advanced_toggle.setChecked(True)
         self.app.processEvents()
         self.assertTrue(self.window.backup_keep.isVisible())
@@ -172,6 +172,6 @@ class ManagementUITests(unittest.TestCase):
         with closing(sqlite3.connect(target / "新记录/state.sqlite")) as db:
             self.assertEqual(db.execute("SELECT title FROM sessions").fetchone()[0], "fixture-database-history")
         restored = self.store.resources()[0]
-        self.assertEqual(restored.options["record_paths"], [str(target / "新记录")])
+        self.assertEqual([Path(path).resolve() for path in restored.options["record_paths"]], [(target / "新记录").resolve()])
         self.assertNotIn("executable", restored.options)
         self.assertNotIn("fixture-chat-history", str(self.store.tasks()))
