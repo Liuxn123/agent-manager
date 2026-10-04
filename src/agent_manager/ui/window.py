@@ -163,6 +163,8 @@ class ResourcePage(QWidget):
             return
         observation = self.window.observations.get(resource.id)
         capabilities = self.window.service.registry.get(resource).capabilities
+        if not resource.options.get("manage_git"):
+            capabilities = capabilities - {"git_pull"}
         payload = {"名称": resource.name, "类型": KINDS[resource.kind], "可用操作": "、".join(ACTION_LABELS.get(action, action) for action in sorted(capabilities) if action != "open_vault" or resource.kind == "vault")}
         if resource.kind == "agent":
             payload["使用的 Agent"] = resource.options.get("engine", "其他 Agent")
@@ -212,7 +214,7 @@ class ResourcePage(QWidget):
             menu.addAction("登记 Workspace 中的项目", self.window.discover_workspace)
         menu.addSeparator()
         for action, label in labels.items():
-            if action in capabilities and (action != "open_vault" or resource.kind == "vault"):
+            if action in capabilities and (action != "open_vault" or resource.kind == "vault") and (action != "git_pull" or resource.options.get("manage_git")):
                 menu.addAction(label, lambda action=action: self.dispatch(action))
         menu.addSeparator()
         menu.addAction("移除登记", lambda: self.window.remove_resource(resource))
@@ -414,10 +416,38 @@ class MainWindow(QMainWindow):
         bar.addWidget(button("打开备份目录", lambda: self.open_path(self.service.backup_root())))
         bar.addStretch()
         layout.addLayout(bar)
+        repository_bar = QHBoxLayout()
+        self.agent_repository_label = QLabel()
+        self.agent_repository_label.setWordWrap(True)
+        self.agent_repository_label.setObjectName("Subtitle")
+        self.refresh_agent_repository()
+        repository_bar.addWidget(self.agent_repository_label, 1)
+        repository_bar.addWidget(button("选择仓库", self.choose_agent_repository))
+        repository_bar.addWidget(button("整理 Agent 备份", self.organize_agent_repository))
+        layout.addLayout(repository_bar)
         self.backup_table = table(["资源", "时间", "文件数", "大小", "校验状态"])
         layout.addWidget(self.backup_table)
         self.backup_rows: list[tuple[Resource, dict]] = []
         self.stack.addWidget(page)
+
+    def refresh_agent_repository(self) -> None:
+        path = self.store.setting("agent_backup_repository", "")
+        self.agent_repository_label.setText("Agent 备份仓库：" + (path or "未选择（只存加密备份副本）"))
+
+    def choose_agent_repository(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "选择专用 Agent 备份仓库或空文件夹", self.store.setting("agent_backup_repository", str(self.service.backup_root().parent)))
+        if path:
+            self.store.set_setting("agent_backup_repository", path)
+            self.refresh_agent_repository()
+
+    def organize_agent_repository(self) -> None:
+        path = self.store.setting("agent_backup_repository", "")
+        if not path:
+            QMessageBox.information(self, "先选择仓库", "请选择专用 Agent 备份仓库，或一个空文件夹。myself 和项目文件夹不能选在这里。")
+            return
+        def completed(report):
+            QMessageBox.information(self, "Agent 备份已整理", f"新增 {report['copied']} 份，已有 {report['existing']} 份，跳过 {report['skipped']} 份。\n" + report["note"])
+        self.submit(None, "整理 Agent 备份仓库", lambda context: self.service.organize_agent_backups(Path(path), context), completed)
 
     def build_tasks(self) -> None:
         page = QWidget()
@@ -1066,7 +1096,7 @@ class MainWindow(QMainWindow):
                     continue
                 if item.get("role") == "local-hermes-backup":
                     candidates.append(Resource("本地 Hermes", "hermes_local", {"home": str(home), "backup_repo": str(path), "workspace": str(root), "python": ResourceDialog.default_python(), "passphrase_file": str(home / ".hermes-backup-passphrase"), "push": True}))
-                elif item.get("role") not in {"server-hermes-backup", "backup-archive"}:
+                elif item.get("role") not in {"server-hermes-backup", "backup-archive", "agent-record-backups"}:
                     exclusions = [Path(entry["path"]).parts[0] for entry in document.get("repositories", []) if entry.get("path") not in {".", ""}] if path == root else []
                     candidates.append(Resource(item.get("id", path.name), "vault" if (path / ".obsidian").is_dir() else "project", {"path": str(path), "exclude_dirs": exclusions}))
             return {"candidates": [resource.to_dict() for resource in candidates]}

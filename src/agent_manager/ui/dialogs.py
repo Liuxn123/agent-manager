@@ -85,6 +85,10 @@ class ResourceDialog(QDialog):
         else:
             self.add_field("path", "项目文件夹（Agent 可不填）" if kind == "agent" else "项目文件夹", options.get("path", ""), "dir")
             self.add_field("exclude_dirs", "额外排除目录名", ", ".join(options.get("exclude_dirs", [])))
+            if kind == "vault":
+                self.manage_git = QCheckBox("独立管理知识库 Git（例如 myself）")
+                self.manage_git.setChecked(bool(options.get("manage_git")))
+                self.form.addRow("", self.manage_git)
             if kind == "agent":
                 self.engine = QComboBox()
                 self.engine.addItems(ENGINES)
@@ -187,6 +191,8 @@ class ResourceDialog(QDialog):
                 if self.kind != "agent" and not options["path"]:
                     raise UserError("请选择资源目录。")
                 options["exclude_dirs"] = [part.strip() for part in values["exclude_dirs"].split(",") if part.strip()]
+                if self.kind == "vault":
+                    options["manage_git"] = self.manage_git.isChecked()
                 if self.kind == "agent":
                     options["engine"] = self.engine.currentText()
                     options["record_paths"] = [self.record_paths.item(index).text() for index in range(self.record_paths.count())]

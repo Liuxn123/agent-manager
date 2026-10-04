@@ -8,7 +8,7 @@ from .local import required_directory
 
 
 class ProjectAdapter:
-    capabilities = frozenset({"observe", "backup", "verify", "restore", "open", "git_pull", "open_vault"})
+    capabilities = frozenset({"observe", "backup", "verify", "restore", "open"})
 
     def observe(self, resource: Resource, context: TaskContext) -> dict:
         root = required_directory(resource.options, "path")
@@ -19,15 +19,25 @@ class ProjectAdapter:
             if len(result["entries"]) >= 100:
                 break
             result["entries"].append({"name": path.name, "type": "目录" if path.is_dir() else "文件", "link": path.is_symlink()})
-        if (root / ".git").exists():
+        result["backup_note"] = "加密保存工作文件与附件；不检查项目 Git，不打包项目 Git 历史。关闭写入程序后备份。"
+        return result
+
+
+class VaultAdapter(ProjectAdapter):
+    capabilities = ProjectAdapter.capabilities | {"git_pull", "open_vault"}
+
+    def observe(self, resource: Resource, context: TaskContext) -> dict:
+        result = super().observe(resource, context)
+        root = required_directory(resource.options, "path")
+        if resource.options.get("manage_git") and (root / ".git").exists():
             result["git_status"] = run_process(["git", "-C", str(root), "status", "--short", "--branch"], context, timeout=30).strip()
             result["remotes"] = run_process(["git", "-C", str(root), "remote"], context, timeout=30).splitlines()
-        else:
-            result["git_status"] = "未登记 Git 仓库"
-        result["backup_note"] = "加密保存工作文件、附件及本地 Git 历史；依赖目录默认排除。关闭写入程序后备份。"
+        result["backup_note"] = "知识库独立管理；仅明确启用的知识库检查并备份 Git 历史。"
         return result
 
     def git_pull(self, resource: Resource, context: TaskContext) -> dict:
+        if not resource.options.get("manage_git"):
+            raise UserError("这个知识库未启用独立 Git 管理。项目 Git 不由管家检查或拉取。")
         root = required_directory(resource.options, "path")
         if not (root / ".git").exists():
             raise UserError("此项目不是 Git 仓库。")

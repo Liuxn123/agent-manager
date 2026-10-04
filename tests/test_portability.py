@@ -80,22 +80,21 @@ class PortabilityTests(unittest.TestCase):
         self.assertTrue((target / "records/sessions/chat.jsonl").is_file())
 
     @unittest.skipUnless(shutil.which("git"), "Git unavailable")
-    def test_agent_bundle_keeps_git_history_and_uncommitted_work(self):
+    def test_agent_bundle_keeps_work_files_without_inspecting_project_git(self):
         def git(*arguments):
             return subprocess.run(["git", "-C", str(self.project), *arguments], check=True, capture_output=True, text=True).stdout.strip()
         git("init")
         git("add", ".")
         git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture")
-        commit = git("rev-parse", "HEAD")
         (self.project / "成果.md").write_text("未提交成果", encoding="utf-8")
-        source = self.backup()
+        with patch("agent_manager.archives.subprocess.run", side_effect=AssertionError("Project Git must not be inspected")):
+            source = self.backup()
         target = self.root / "git-restore"
         plan = archives.plan_restore(self.resource, source, target, self.password, self.context)
-        result = archives.apply_restore(plan, self.password, self.context)
+        archives.apply_restore(plan, self.password, self.context)
         bundle = target / "project/.agent-manager-history.bundle"
-        self.assertTrue(bundle.is_file())
-        refs = subprocess.run(["git", "bundle", "list-heads", str(bundle)], check=True, capture_output=True, text=True).stdout
-        self.assertIn(commit, refs)
+        self.assertFalse(bundle.exists())
+        self.assertFalse((target / "project/.git").exists())
         self.assertEqual((target / "project/成果.md").read_text(encoding="utf-8"), "未提交成果")
 
     def test_folder_traversal_collisions_and_destination_inside_records_are_rejected(self):

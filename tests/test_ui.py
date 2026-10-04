@@ -90,6 +90,32 @@ class UITests(unittest.TestCase):
         self.assertEqual(task["state"], "success")
         self.assertNotIn("fixture-private-conversation", task["result"] + task["log"])
 
+    def test_agent_repository_button_runs_background_job_and_vault_git_is_explicit(self):
+        repository = self.root / "agent-backups"
+        self.store.set_setting("agent_backup_repository", str(repository))
+        self.window.refresh_agent_repository()
+        self.window.navigation.setCurrentRow(5)
+        self.window.resize(960, 660)
+        self.app.processEvents()
+        self.assertIn(str(repository), self.window.agent_repository_label.text())
+        self.assertGreater(self.window.agent_repository_label.width(), 150)
+        with patch("agent_manager.ui.window.QMessageBox.information") as completed:
+            self.window.organize_agent_repository()
+            deadline = time.monotonic() + 10
+            while self.window.jobs and time.monotonic() < deadline:
+                QTest.qWait(20)
+                time.sleep(0.005)
+            self.assertFalse(self.window.jobs)
+            self.assertEqual(self.store.tasks()[0]["state"], "success")
+            self.assertIn("当前尚无 Agent 备份", completed.call_args[0][2])
+        self.assertTrue((repository / "catalog.json").is_file())
+        dialog = ResourceDialog(self.window, "vault")
+        self.assertFalse(dialog.manage_git.isChecked())
+        dialog.fields["path"].setText(str(self.root))
+        dialog.manage_git.setChecked(True)
+        dialog.save()
+        self.assertTrue(dialog.result_resource.options["manage_git"])
+
     def test_obsidian_external_note_and_atomic_status_edits_refresh_original_documents(self):
         from agent_manager.project_workspaces import ProjectWorkspace
         from agent_manager.runtime import TaskContext

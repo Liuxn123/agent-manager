@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': "Obsidian 联动：本地项目可直接在 Obsidian 打开当前状态、任务、日志与所选笔记的同一份原文件。使用官方 URI 接口，中文、空格和保留字符正确编码，无需插件；错误入口停止打开，遵守无入口例外。\n\n新增“项目笔记”页签，按需创建带项目编号、草稿属性与管理链接的 Markdown，保存在真实项目“笔记”目录；归档与重新启用随完整项目保留。所选管理文件和笔记的外部编辑、原子替换自动重读，正文不持久化到管家活动记录。Obsidian 总览可打开两份索引，或显式刷新生成区块，保留人工说明。窗口退出停止监听及定时器，合并重复后台读取。\n\n四个平台通过测试、解压启动与便携目录移动检查。初次使用请在 Obsidian 打开工作区的 myself 知识库；换电脑需重新打开并核对项目入口。程序不安装插件或修改 Obsidian 配置。目录联接/符号链接的同步有边界，Vault/Sync 不代表外部项目已备份，需携带完整 projects、archive 和根目录 agent。归档前停止其他程序写入。旧 L-归档保持只读。"})
+            'body': "仓库分工：myself 沿用自己的独立 Git；普通项目和 Agent 项目不再检查 Git 或打包提交历史。仅明确启用独立 Git 管理的知识库保留原有历史备份能力，旧历史包仍可恢复。\n\n新增“备份与换电脑 → 整理 Agent 备份”：将已校验的 Codex、WorkBuddy、CodeBuddy、Claude Code 等加密 .amb 副本按类型和编号归入专用 agent-backups 仓库，索引不含本机路径、聊天正文或口令。重复整理不会重复复制；未校验、被修改、同名冲突、链接与越界路径会跳过或停止，原副本保留。只更新本地仓库，提交和推送使用现有 Git 工具。单包限 50 MiB，较大备份继续用便携 backups/U 盘携带。\n\n设置保持精简，使用说明已更新。程序源码、myself、Hermes 原生备份、其他 Agent 记录仓库各自独立；旧 workbench 源码保留。四个平台执行测试、打包及解压启动和便携迁移验证。"})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

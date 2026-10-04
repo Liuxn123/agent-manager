@@ -168,7 +168,7 @@ def _create_single_archive(resource: Resource, destination: Path, password: str,
                             raise UserError("备份期间文件发生变化，请关闭写入程序后重试。")
                         records.append({"path": relative, "sha256": digest.hexdigest(), "size": before.st_size, "mode": stat.S_IMODE(before.st_mode)})
                 # Bundle preserves local commits without copying a live .git directory.
-                if (source / ".git").exists():
+                if resource.kind == "vault" and resource.options.get("manage_git") and (source / ".git").exists():
                     with tempfile.TemporaryDirectory(prefix="agent-manager-git-") as temporary_git:
                         bundle = Path(temporary_git) / "history.bundle"
                         try:
@@ -261,26 +261,6 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
                                 if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
                                     raise UserError("文件在备份期间发生变化，请退出原应用后重新备份。")
                                 records.append({"path": relative, "sha256": digest.hexdigest(), "size": before.st_size, "mode": mode, "database_snapshot": database})
-                    if component["role"] == "project" and (source / ".git").exists():
-                        with tempfile.TemporaryDirectory(prefix="agent-manager-history-") as folder:
-                            bundle = Path(folder) / "history.bundle"
-                            try:
-                                heads = subprocess.run(["git", "-C", str(source), "show-ref"], capture_output=True, timeout=30,
-                                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-                            except (OSError, subprocess.TimeoutExpired) as exc:
-                                raise UserError("无法检查项目 Git 历史，请检查 Git 安装。") from exc
-                            if heads.returncode not in {0, 1}:
-                                raise UserError("项目 Git 历史检查失败。")
-                            if heads.returncode == 0:
-                                relative = prefix + "/.agent-manager-history.bundle"
-                                if any(record["path"].casefold() == relative.casefold() for record in records):
-                                    raise UserError("项目已含有历史包，请先移走 .agent-manager-history.bundle。")
-                                run_process(["git", "-C", str(source), "bundle", "create", str(bundle), "--all"], context)
-                                total += bundle.stat().st_size
-                                if total > MAX_SIZE or len(records) >= MAX_FILES:
-                                    raise UserError("含 Git 历史的资料超过备份大小限制。")
-                                archive.write(bundle, "files/" + relative)
-                                records.append({"path": relative, "sha256": path_token(bundle), "size": bundle.stat().st_size, "mode": 0o600})
                 manifest = {"schema_version": 1, "resource_id": resource.id, "kind": resource.kind, "resource_name": resource.name,
                             "engine": resource.options.get("engine", "其他 Agent"), "components": components,
                             "created_at": now(), "files": records, "directories": directories, "excluded": excluded}

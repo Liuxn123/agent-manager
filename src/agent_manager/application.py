@@ -10,7 +10,7 @@ from pathlib import Path
 from . import archives
 from .adapters.agents import AgentAdapter
 from .adapters.local import LocalHermesAdapter
-from .adapters.projects import ProjectAdapter
+from .adapters.projects import ProjectAdapter, VaultAdapter
 from .adapters.server import ServerHermesAdapter
 from .domain import AdapterRegistry, Resource, RestorePlan, UserError
 from .runtime import ResourceLocks, TaskContext
@@ -26,7 +26,7 @@ def build_registry() -> AdapterRegistry:
     registry.register("hermes_local", LocalHermesAdapter())
     registry.register("hermes_server", ServerHermesAdapter())
     registry.register("project", ProjectAdapter())
-    registry.register("vault", ProjectAdapter())
+    registry.register("vault", VaultAdapter())
     registry.register("agent", AgentAdapter())
     return registry
 
@@ -98,8 +98,15 @@ class ApplicationService:
         previous = self.store.evidence(str(source.resolve()))
         if previous.get("archive_sha256") != report["archive_sha256"]:
             previous = {}
-        self.store.save_evidence(str(source.resolve()), {**previous, **before, "verified_at": now(), "archive_sha256": report["archive_sha256"]})
+        identity = {key: report[key] for key in ("resource_id", "kind", "engine", "created_at")}
+        self.store.save_evidence(str(source.resolve()), {**previous, **before, **identity, "verified_at": now(), "archive_sha256": report["archive_sha256"]})
         return report
+
+    def organize_agent_backups(self, repository: Path, context: TaskContext) -> dict:
+        from .backup_repository import organize
+        keys = ["path:" + os.path.normcase(str(path.resolve())) for path in (repository, self.backup_root())]
+        with self.locks.acquire(keys):
+            return organize(self.store, self.backup_root(), repository, context)
 
     def rehearse(self, resource: Resource, source: Path, password: str, context: TaskContext) -> dict:
         report = self.verify_backup(source, password, context)

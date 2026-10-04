@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from agent_manager import archives
+from agent_manager.application import ApplicationService
+from agent_manager.backup_repository import initialize
+from agent_manager.domain import Resource, UserError
+from agent_manager.runtime import TaskContext
+from agent_manager.storage import Store
+
+
+class BackupRepositoryTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.source = self.root / "private-records"
+        self.source.mkdir()
+        (self.source / "auth.json").write_text('{"token":"fixture-secret-never-export"}')
+        (self.source / "chat.txt").write_text("fixture-private-conversation")
+        self.store = Store(self.root / "data")
+        self.resource = Resource("秘密项目名", "agent", {"engine": "Codex", "record_paths": [str(self.source)], "portable_bundle": True})
+        self.store.save_resource(self.resource)
+        self.service = ApplicationService(self.store)
+        self.repository = self.root / "agent-backups"
+        self.context = TaskContext()
+        self.password = "fixture-password"
+
+    def backup(self):
+        return Path(self.service.backup(self.resource, self.context, self.password)["archive"])
+
+    def organize(self):
+        return self.service.organize_agent_backups(self.repository, self.context)
+
+    def test_verified_encrypted_copy_is_portable_private_and_idempotent(self):
+        source = self.backup()
+        source.with_suffix(".json").write_text(json.dumps({"resource_id": self.resource.id, "path": str(self.source), "password": "sidecar-sensitive"}))
+        report = self.organize()
+        self.assertEqual(report["copied"], 1)
+        destination = next(self.repository.rglob("*.amb"))
+        self.assertEqual(destination.read_bytes(), source.read_bytes())
+        index = (self.repository / "catalog.json").read_text()
+        self.assertNotIn(str(self.source), index)
+        self.assertNotIn(self.resource.name, index)
+        self.assertNotIn("sidecar-sensitive", index)
+        for path in self.repository.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(b"fixture-secret-never-export", path.read_bytes())
+                self.assertNotIn(b"fixture-private-conversation", path.read_bytes())
+        self.assertEqual(self.organize()["existing"], 1)
+        report = archives.verify_archive(destination, self.password, self.context)
+        target = self.root / "new-computer"
+        plan = archives.plan_restore(self.resource, destination, target, self.password, self.context)
+        archives.apply_restore(plan, self.password, self.context)
+        self.assertTrue((target / "records/auth.json").is_file())
+        self.assertEqual(report["kind"], "agent")
+
+    def test_unverified_tampered_large_and_plaintext_files_are_skipped(self):
+        source = self.backup()
+        original = source.read_bytes()
+        source.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
+        self.assertEqual(self.organize()["skipped"], 1)
+        source.write_bytes(original)
+        with patch("agent_manager.backup_repository.MAX_GIT_ARCHIVE", 100):
+            self.assertEqual(self.organize()["skipped"], 1)
+        self.store.save_evidence(str(source.resolve()), {})
+        self.assertEqual(self.organize()["skipped"], 1)
+        self.assertFalse(list(self.repository.rglob("*.amb")))
+
+    def test_same_name_conflict_and_changed_repository_copy_are_preserved(self):
+        self.backup()
+        self.organize()
+        destination = next(self.repository.rglob("*.amb"))
+        destination.write_bytes(b"keep-conflict")
+        with self.assertRaises(UserError):
+            self.organize()
+        self.assertEqual(destination.read_bytes(), b"keep-conflict")
+        (self.repository / "catalog.json").unlink()
+        with self.assertRaises(UserError):
+            self.organize()
+        self.assertEqual(destination.read_bytes(), b"keep-conflict")
+
+    def test_myself_project_and_nonempty_workbench_are_not_backup_repositories(self):
+        with self.assertRaises(UserError):
+            initialize(self.source)
+        project = Resource("myself", "vault", {"path": str(self.source)})
+        self.store.save_resource(project)
+        self.service.backup(project, self.context, self.password)
+        self.assertEqual(self.organize()["total"], 0)
+        with self.assertRaises(UserError):
+            self.service.organize_agent_backups(self.source / "nested-repo", self.context)
+        self.assertFalse((self.source / "nested-repo").exists())
+
+    def test_catalog_traversal_does_not_read_or_overwrite_outside_files(self):
+        initialize(self.repository)
+        sentinel = self.root / "keep.txt"
+        sentinel.write_text("keep")
+        (self.repository / "catalog.json").write_text(json.dumps({"schema_version": 1, "archives": [
+            {"path": "../keep.txt", "resource_id": self.resource.id, "engine": "codex", "created_at": "", "size": 4, "sha256": ""}]}))
+        with self.assertRaises(UserError):
+            self.organize()
+        self.assertEqual(sentinel.read_text(), "keep")
+
+    def test_ordinary_project_and_vault_git_are_opt_in(self):
+        from agent_manager.adapters.projects import ProjectAdapter, VaultAdapter
+        (self.source / ".git").mkdir()
+        for kind, adapter in (("project", ProjectAdapter()), ("vault", VaultAdapter())):
+            resource = Resource("fixture", kind, {"path": str(self.source)})
+            with patch("agent_manager.adapters.projects.run_process", side_effect=AssertionError("Git must not be inspected")), patch("agent_manager.archives.subprocess.run", side_effect=AssertionError("Git must not be bundled")):
+                report = adapter.observe(resource, self.context)
+                self.assertNotIn("git_status", report)
+                self.service.backup(resource, self.context, self.password)
+            with self.assertRaises(UserError):
+                self.service.action(resource, "git_pull", self.context)

@@ -27,7 +27,7 @@ class ArchiveTests(unittest.TestCase):
         (self.project / ".env").write_text("TEST_PRIVATE_VALUE=local-only-fixture", encoding="utf-8")
         (self.project / "node_modules").mkdir()
         (self.project / "node_modules/cache.txt").write_text("excluded")
-        self.resource = Resource("知识库", "vault", {"path": str(self.project)})
+        self.resource = Resource("知识库", "vault", {"path": str(self.project), "manage_git": True})
         self.password = "test-password-备份"
         self.context = TaskContext()
 
