@@ -85,6 +85,7 @@ class ResourcePage(QWidget):
         self.selector.setMinimumContentsLength(16)
         self.selector.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.selector.currentIndexChanged.connect(self.select_instance)
+        self.selector.setVisible(self.compact)
         toolbar.addWidget(self.selector if self.compact else self.search, 1)
         if self.compact:
             self.search.hide()
