@@ -23,7 +23,7 @@ QWidget#Sidebar { background: #151d35; }
 QLabel#Brand { color: #ffffff; font-size: 23px; font-weight: 700; }
 QLabel#BrandSub { color: #8e9abb; font-size: 11px; }
 QListWidget#Navigation { background: transparent; border: none; color: #b3bdd5; outline: none; }
-QListWidget#Navigation::item { padding: 13px 12px; margin: 4px 0px; border-radius: 9px; }
+QListWidget#Navigation::item { padding: 10px 12px; margin: 3px 0px; border-radius: 6px; }
 QListWidget#Navigation::item:selected { background: #303f72; color: #ffffff; }
 QListWidget#Navigation::item:hover { background: #222d4b; }
 QLabel#Title { color: #17213b; font-size: 27px; font-weight: 700; }
@@ -69,4 +69,15 @@ QTabBar::tab:selected { color: #5368c5; border-bottom: 2px solid #5368c5; }
 QSplitter::handle { background: transparent; width: 12px; height: 12px; }
 QFrame#TrendBar { background: #9dadE9; border-radius: 3px; }
 QToolTip { background: #24314f; color: #ffffff; border: none; padding: 6px; }
+QWidget#SettingsBody { background: #f5f6fb; }
+QWidget#SettingsPage QLabel#Title { font-size: 22px; }
+QWidget#SettingsPage QPushButton { border-radius: 3px; padding: 6px 12px; }
+QWidget#SettingsPage QPushButton[primary="true"] { background: #4d5b76; border-color: #4d5b76; }
+QWidget#SettingsPage QPushButton[primary="true"]:hover { background: #3c4860; }
+QWidget#SettingsPage QLineEdit, QWidget#SettingsPage QSpinBox { border-radius: 3px; padding: 6px; }
+QWidget#SettingsPage QTextEdit { border-radius: 3px; padding: 8px; }
+QWidget#SettingsPage QToolButton { border: none; background: transparent; padding: 6px 0px; color: #4d5b76; }
+QWidget#SettingsPage QToolButton:hover { color: #26334f; }
+QPushButton#SidebarHelp { background: transparent; color: #b3bdd5; border: 1px solid #34405c; border-radius: 3px; padding: 6px; }
+QPushButton#SidebarHelp:hover { background: #222d4b; color: #ffffff; }
 """

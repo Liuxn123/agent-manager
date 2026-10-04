@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': '工作台集中显示资料保护、服务器状态和最近活动；资源页精简常用按钮，诊断放入详情。\n\n发布包默认便携模式：data 和 backups 随程序目录携带，内部路径跟随目录变化；可选加密口令库用独立主口令解锁。\n\n新增每天自动备份（按资源开启）、成功校验后保留旧版本策略、临时目录恢复演练、本地记录搜索、原应用进程检测与 Agent SQLite 一致性快照。SSH 设置补充登录账号、主机指纹文件、已有环境参数读取以及服务器备份环境检测。\n\n四个平台均通过测试、运行包解压启动和便携目录移动检查。备份口令库默认锁定，自动备份仅在管家运行且资源已开启时执行。外部目录和 SSH 密钥在新电脑需要重新选择；非数据库文件仍需要停止写入。服务器原生恢复仍使用空目录；本地文件恢复不保证云端会话同步。具体说明见 README。'})
+            'body': '设置页改为简单表单：常用内容只保留备份位置、保留数量和可选口令库；导入导出、环境检查等默认折叠。\n\n新增程序内离线使用说明，按工作台、本地 Hermes、服务器 Hermes、项目与 Obsidian、其他 Agent、备份与迁移、活动记录、设置分模块跳转。运行包也附带独立的使用说明.md。\n\n补充同类工具调研与功能建议，清楚区分当前已有能力和未来建议。备份与恢复沿用原有流程。\n\n四个平台通过测试、运行包解压启动和便携目录移动检查。复制整个便携目录，保留 data、backups 和恢复资料。外部目录及 SSH 密钥需要在新电脑重新选择。自动备份仅在管家打开且资源已开启时执行；可选口令库需要自行创建主口令。具体说明见 README。'})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

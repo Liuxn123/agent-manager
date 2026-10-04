@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFileDialo
     QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
     QMainWindow, QMenu, QMessageBox, QPushButton, QProgressBar, QSplitter, QStackedWidget,
     QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget, QScrollArea,
-    QTabWidget, QListWidgetItem, QSpinBox)
+    QTabWidget, QListWidgetItem, QSpinBox, QToolButton, QFormLayout)
 
 from .. import __version__, archives
 from ..application import ApplicationService
@@ -255,6 +255,9 @@ class MainWindow(QMainWindow):
         for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "项目与 Obsidian", "其他 Agent", "备份与迁移", "活动记录", "设置"]):
             self.navigation.addItem(QListWidgetItem(nav_icon(index), label))
         sidebar_layout.addWidget(self.navigation, 1)
+        help_button = button("使用说明", self.show_guide)
+        help_button.setObjectName("SidebarHelp")
+        sidebar_layout.addWidget(help_button)
         version = QLabel(f"v{__version__}  ·  {'便携模式' if store.portable_root else '本机模式'}")
         version.setObjectName("BrandSub")
         sidebar_layout.addWidget(version)
@@ -439,51 +442,113 @@ class MainWindow(QMainWindow):
 
     def build_settings(self) -> None:
         page = QWidget()
+        page.setObjectName("SettingsPage")
         layout = QVBoxLayout(page)
+        layout.setSpacing(14)
+        heading = QHBoxLayout()
         title = QLabel("设置")
         title.setObjectName("Title")
-        layout.addWidget(title)
-        hint = QLabel("路径可以在每台电脑重新配置。配置导入只合并新资源；凭据与任务记录不会随配置导出。")
+        heading.addWidget(title)
+        heading.addStretch()
+        heading.addWidget(button("使用说明", self.show_guide))
+        layout.addLayout(heading)
+        hint = QLabel("通常只需要选择备份位置。其他选项可以保持默认。")
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
         layout.addWidget(hint)
-        layout.addSpacing(20)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        body.setObjectName("SettingsBody")
+        fields = QVBoxLayout(body)
+        fields.setContentsMargins(0, 6, 0, 0)
+        fields.setSpacing(18)
+        form = QFormLayout()
+        form.setSpacing(12)
         row = QHBoxLayout()
-        row.addWidget(QLabel("加密备份保存目录"))
         self.backup_path = QLineEdit(str(self.service.backup_root()))
         row.addWidget(self.backup_path, 1)
         row.addWidget(button("选择", lambda: choose_path(self.backup_path, self)))
-        row.addWidget(button("保存", self.save_settings, True))
-        layout.addLayout(row)
+        form.addRow("备份保存位置", row)
         policy = QHBoxLayout()
-        policy.addWidget(QLabel("自动备份保留最近"))
         self.backup_keep = QSpinBox()
         self.backup_keep.setRange(1, 100)
         self.backup_keep.setValue(int(self.store.setting("backup_keep", 10)))
         policy.addWidget(self.backup_keep)
-        policy.addWidget(QLabel("份；先备份并校验成功，再清理旧版本"))
+        policy.addWidget(QLabel("份（自动备份成功后清理旧版本）"))
         policy.addStretch()
-        layout.addLayout(policy)
-        tools = QHBoxLayout()
-        tools.addWidget(button("导出资源配置", self.export_config))
-        tools.addWidget(button("导入资源配置", self.import_config))
-        tools.addWidget(button("检查运行环境", self.diagnostics))
-        tools.addWidget(button("移除保存的备份口令", self.remove_secret))
-        tools.addStretch()
-        layout.addLayout(tools)
+        form.addRow("每项自动备份保留", policy)
+        fields.addLayout(form)
+        note = QLabel("自动备份在各项资料的“编辑”中开启，只有管家打开时才会执行。")
+        note.setObjectName("Subtitle")
+        note.setWordWrap(True)
+        fields.addWidget(note)
+        save = QHBoxLayout()
+        save.addWidget(button("保存设置", self.save_settings, True))
+        save.addStretch()
+        fields.addLayout(save)
         if self.store.portable_root:
+            line = QFrame()
+            line.setFrameShape(QFrame.Shape.HLine)
+            fields.addWidget(line)
+            self.vault_status = QLabel()
+            fields.addWidget(self.vault_status)
             vault = QHBoxLayout()
-            vault.addWidget(button("解锁便携口令库", self.unlock_vault, True))
+            self.vault_unlock_button = button("解锁口令库", self.unlock_vault)
+            vault.addWidget(self.vault_unlock_button)
             vault.addWidget(button("锁定口令库", self.lock_vault))
-            vault.addWidget(button("打开便携数据目录", lambda: self.open_path(self.store.root)))
             vault.addStretch()
-            layout.addLayout(vault)
+            fields.addLayout(vault)
+            self.refresh_vault_status()
+            vault_hint = QLabel("可选：记住各项备份口令。主口令请另存；关闭管家后会自动锁定。")
+            vault_hint.setWordWrap(True)
+            vault_hint.setObjectName("Subtitle")
+            fields.addWidget(vault_hint)
+        self.settings_advanced_toggle = QToolButton()
+        self.settings_advanced_toggle.setText("更多设置")
+        self.settings_advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.settings_advanced_toggle.setCheckable(True)
+        self.settings_advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        fields.addWidget(self.settings_advanced_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.settings_advanced = QWidget()
+        advanced = QVBoxLayout(self.settings_advanced)
+        advanced.setContentsMargins(0, 0, 0, 0)
+        tools = QGridLayout()
+        for index, widget in enumerate([
+            button("导出资源配置", self.export_config), button("导入资源配置", self.import_config),
+            button("检查运行环境", self.diagnostics), button("移除保存的备份口令", self.remove_secret),
+            button("打开管家数据目录", lambda: self.open_path(self.store.root)),
+        ]):
+            tools.addWidget(widget, index // 2, index % 2)
+        advanced.addLayout(tools)
         self.settings_info = text_view()
-        self.settings_info.setPlainText("管家数据：" + str(self.store.root) + "\n\n" +
-            ("便携模式：程序、data、backups 整个文件夹一起复制到 U 盘。盘符改变时内部路径自动跟随；新电脑上的 Hermes、项目目录和 SSH 文件需要重新选择。加密口令库可以随 U 盘携带，主口令需单独保存。" if self.store.portable_root else "本机模式：口令可以临时输入，也可保存在系统安全凭据存储。发布包默认使用便携模式。") +
-            "\n\n自动备份：在资源的“编辑”中开启，管家打开时每天检查一次。工作 Agent 运行时延后；需要已保存的备份口令。\n\n恢复演练：在备份页选择“恢复演练”，只在临时目录恢复。\n\n迁移：选择 .amb 文件、输入口令、调整目标文件夹，再检查恢复清单；原应用可能需要重新登录。\n\n导出资源清单不包含密钥或备份口令。服务器的私钥不会自动复制到 U 盘。")
-        layout.addWidget(self.settings_info, 1)
+        self.settings_info.setMinimumHeight(130)
+        self.settings_info.setMaximumHeight(180)
+        self.settings_info.setPlainText("管家数据：" + str(self.store.root) + "\n\n配置导出只保存登记清单，不包含项目文件、聊天记录、口令或 SSH 私钥。完整迁移请查看使用说明。")
+        advanced.addWidget(self.settings_info)
+        fields.addWidget(self.settings_advanced)
+        self.settings_advanced.hide()
+        self.settings_advanced_toggle.toggled.connect(self.toggle_settings_advanced)
+        fields.addStretch()
+        scroll.setWidget(body)
+        layout.addWidget(scroll, 1)
         self.stack.addWidget(page)
+
+    def toggle_settings_advanced(self, expanded: bool) -> None:
+        self.settings_advanced.setVisible(expanded)
+        self.settings_advanced_toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+
+    def show_guide(self) -> None:
+        from .help import GuideDialog
+        GuideDialog(self).exec()
+
+    def refresh_vault_status(self) -> None:
+        if not hasattr(self, "vault_status"):
+            return
+        secrets = self.service.secrets
+        exists = secrets.vault and secrets.vault.exists()
+        self.vault_status.setText("备份口令库：" + ("已解锁" if secrets.unlocked else "已锁定" if exists else "尚未创建（可选）"))
+        self.vault_unlock_button.setText("解锁口令库" if exists else "创建口令库")
 
     def is_busy(self, identity: str) -> bool:
         return any(resource_id == identity for _, resource_id, _ in self.jobs.values())
@@ -575,6 +640,7 @@ class MainWindow(QMainWindow):
                 return
         try:
             self.service.secrets.unlock(password)
+            self.refresh_vault_status()
             self.statusBar().showMessage("便携口令库已解锁；关闭程序后自动锁定")
         except UserError as exc:
             QMessageBox.warning(self, "未解锁", str(exc))
@@ -584,6 +650,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "任务运行中", "请在任务结束后锁定口令库。")
             return
         self.service.secrets.lock()
+        self.refresh_vault_status()
         self.statusBar().showMessage("便携口令库已锁定")
 
     def rehearse_selected_backup(self) -> None:
@@ -949,7 +1016,7 @@ class MainWindow(QMainWindow):
             return
         self.store.set_setting("backup_root", str(Path(value).expanduser().resolve()))
         self.store.set_setting("backup_keep", self.backup_keep.value())
-        self.statusBar().showMessage("备份目录已保存")
+        self.statusBar().showMessage("设置已保存")
 
     def export_config(self) -> None:
         destination = QFileDialog.getSaveFileName(self, "导出资源配置", "agent-manager-resources.json", "JSON (*.json)")[0]
@@ -1010,6 +1077,7 @@ class MainWindow(QMainWindow):
         def show(report):
             self.settings_info.setPlainText("本机数据目录：" + report["data_directory"] + "\n\n可用工具：\n" + "\n".join(name + "：" + value for name, value in report["tools"].items()) + "\n\n普通项目和工作 Agent 备份无需单独配置 Python；Hermes 原生备份需要其工具环境。")
             self.navigation.setCurrentRow(7)
+            self.settings_advanced_toggle.setChecked(True)
         self.submit(None, "检查运行依赖", lambda context: self.service.diagnostics(), show)
 
     def remove_secret(self) -> None:

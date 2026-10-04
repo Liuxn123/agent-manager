@@ -59,6 +59,9 @@ def main() -> None:
         else:
             with tarfile.open(package, "r:gz") as archive:
                 archive.extractall(payload, filter="data")
+        guides = list(payload.rglob("USER_GUIDE.md"))
+        if not guides or not any("11. 常见问题" in guide.read_text(encoding="utf-8") for guide in guides):
+            raise SystemExit("Packaged offline user guide is missing or incomplete")
         check_application(root, payload)
         check_application(root, payload, portable=True)
         moved = Path(temporary) / "moved-folder"

@@ -46,6 +46,7 @@ def main() -> None:
         if sys.platform == "darwin":
             shutil.copy2(portable_root / "portable.json", payload / "portable.json")
         shutil.copy2(ROOT / "README.md", payload / "README.md")
+        shutil.copy2(ROOT / "src/agent_manager/assets/docs/USER_GUIDE.md", payload / "使用说明.md")
         shutil.copy2(ROOT / "src/agent_manager/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
         metadata = {"version": __version__, "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version(), "data_mode": "portable"}
         (payload / "BUILD-INFO.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
