@@ -25,6 +25,7 @@ class TextReportDialog(QDialog):
         self.text.setPlainText(report.get("text") or "暂时没有日志记录。")
         layout.addWidget(self.text, 1)
         close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
         close.rejected.connect(self.reject)
         layout.addWidget(close)
 
@@ -86,6 +87,7 @@ class HermesLibraryDialog(QDialog):
         bar.addWidget(folder)
         bar.addStretch()
         close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
         close.rejected.connect(self.reject)
         bar.addWidget(close)
         layout.addLayout(bar)
