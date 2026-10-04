@@ -78,14 +78,14 @@ def main():
     checksums.write_text(''.join(hashlib.sha256(package.read_bytes()).hexdigest() + '  ' + package.name + '\n' for package in packages), encoding='utf-8')
     packages.append(checksums)
     try:
-        release = api(token, route + '/releases/tags/v0.1.0')
+        release = api(token, route + '/releases/tags/v0.2.0')
         assert release['target_commitish'] == head, 'Existing release points to another commit'
     except RuntimeError as error:
         if str(error) != 'GitHub HTTP 404':
             raise
-        release = api(token, route + '/releases', {'tag_name': 'v0.1.0', 'target_commitish': head, 'name': 'Agent 管家 v0.1.0',
+        release = api(token, route + '/releases', {'tag_name': 'v0.2.0', 'target_commitish': head, 'name': 'Agent 管家 v0.2.0',
             'draft': False, 'prerelease': True,
-            'body': '初版：本地 Hermes、服务器 Hermes、本地项目与 Obsidian、Agent 管理，以及设置、备份中心和任务记录。\n\nWindows x64、Linux x64、macOS Intel、macOS Apple Silicon 均通过 19 项测试和运行包启动检查。Windows 包修复了 ICU DLL 冲突，并在实际 Windows 电脑上完成解压启动验证。\n\n服务器恢复目前支持空目录数据恢复；尚未进行生产服务器演练。解压整个包后运行，具体依赖和首次配置见包内 README。'})
+            'body': '以 Hermes 为主，支持 Codex、WorkBuddy 等工作 Agent 的项目文件与本地记录一起加密备份。新电脑直接选择 .amb 文件、输入口令、选择恢复位置；恢复后自动登记资料，并可浏览本地文本记录。\n\n界面加入三步指引、中文资料范围和恢复位置说明；启动参数移到可选区域。聊天内容仅在阅读窗口显示，不写入操作记录。\n\n四个平台均通过自动测试和最终运行包解压启动检查。本机已用模拟资料实际操作添加、备份、恢复和记录浏览。\n\n保存本地文件不等于云端会话同步；原应用可能需要重新登录、登记路径或使用其导入功能。服务器仍采用空目录恢复。具体说明见 README。'})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

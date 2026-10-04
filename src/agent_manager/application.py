@@ -14,6 +14,7 @@ from .domain import AdapterRegistry, Resource, RestorePlan, UserError
 from .runtime import ResourceLocks, TaskContext
 from .security import SecretStore
 from .storage import Store
+from .profiles import sources_for
 
 
 def build_registry() -> AdapterRegistry:
@@ -44,6 +45,10 @@ class ApplicationService:
             for name in ("path", "home", "backup_repo"):
                 if resource.options.get(name):
                     keys.append("path:" + os.path.normcase(str(Path(resource.options[name]).expanduser().resolve())))
+            if resource.kind == "agent":
+                for component in sources_for(resource):
+                    if component["path"]:
+                        keys.append("path:" + os.path.normcase(str(Path(component["path"]).expanduser().resolve())))
             if target:
                 keys.append("path:" + os.path.normcase(str(Path(target).expanduser().resolve())))
         return keys
@@ -67,13 +72,13 @@ class ApplicationService:
                 raise UserError("请停止本工具管理的 Agent 后再备份；外部进程需要自行退出。")
             return archives.create_archive(resource, self.backup_root(), password, context)
 
-    def plan_restore(self, resource: Resource, context: TaskContext, *, source: str = "", target: str = "", password: str = "") -> RestorePlan:
+    def plan_restore(self, resource: Resource, context: TaskContext, *, source: str = "", target: str = "", password: str = "", folders: dict[str, str] | None = None) -> RestorePlan:
         with self.locks.acquire(self.lock_keys(resource, target)):
             if resource.kind == "hermes_local":
                 return self.registry.get(resource).plan_restore(resource, context)
             if resource.kind == "hermes_server":
                 return self.registry.get(resource).plan_restore(resource, context, target)
-            return archives.plan_restore(resource, Path(source), Path(target), password, context)
+            return archives.plan_restore(resource, Path(source), Path(target), password, context, folders)
 
     def restore(self, resource: Resource, plan: RestorePlan, context: TaskContext, password: str = "") -> dict:
         with self.locks.acquire(self.lock_keys(resource, plan.target)):

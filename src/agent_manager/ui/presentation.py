@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 
 from ..security import safe_result
 
+
+def readable_time(value: Any) -> str:
+    try:
+        return datetime.fromisoformat(str(value)).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return str(value)
+
+
+def readable_size(value: int) -> str:
+    if value < 1024:
+        return f"{value} B"
+    if value < 1024 ** 2:
+        return f"{value / 1024:.1f} KB"
+    return f"{value / 1024 ** 2:.1f} MB"
+
 ACTION_LABELS = {"observe": "检查状态", "backup": "创建备份", "verify": "校验备份", "restore": "恢复", "open": "打开目录",
-                 "versions": "备份提交列表", "start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "Git 拉取", "open_vault": "打开 Obsidian"}
+                 "versions": "备份提交列表", "start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "Git 拉取", "open_vault": "打开 Obsidian", "records": "浏览本地记录"}
 FIELD_LABELS = {"home": "运行目录", "home_present": "运行目录存在", "backup_repo": "备份仓库", "snapshot_present": "存在快照",
     "created_at": "备份时间", "counts": "资料数量", "sessions": "会话", "messages": "消息", "skills": "技能", "facts": "事实记忆",
     "format": "备份格式", "git_status": "Git 状态", "branch": "当前分支", "runtime_state": "运行状态", "connected": "连接成功",
@@ -19,7 +35,9 @@ FIELD_LABELS = {"home": "运行目录", "home_present": "运行目录存在", "b
     "archive": "备份文件", "verified": "执行过校验", "existing_files_overwritten": "覆盖现有文件数", "archive_sha256": "备份校验标识",
     "pushed": "产生远端推送", "status": "操作状态", "service_started": "已启动恢复后的服务", "operation": "操作",
     "started": "进程已启动", "stopped": "进程已停止", "exited": "进程已退出", "exit_code": "退出码", "error": "问题",
-    "error_type": "诊断类型", "git_history": "包含 Git 历史", "versions": "备份提交", "commit": "提交", "time": "时间"}
+    "error_type": "诊断类型", "git_history": "包含 Git 历史", "versions": "备份提交", "commit": "提交", "time": "时间",
+    "resource_name": "资料名称", "kind": "资料类型", "components": "包含的资料目录", "component_folders": "恢复后的文件夹",
+    "restored_components": "已恢复的资料", "label": "资料", "role": "用途", "prefix": "备份内文件夹", "exists": "目录存在"}
 
 
 def readable_report(report: Any, depth: int = 0) -> str:
@@ -28,9 +46,11 @@ def readable_report(report: Any, depth: int = 0) -> str:
     if isinstance(report, dict):
         lines = []
         for key, value in report.items():
-            if key in {"archive_sha256", "resource_id"}:
+            if key in {"archive_sha256", "resource_id", "id", "prefix"}:
                 continue
-            label = FIELD_LABELS.get(key, key)
+            label = FIELD_LABELS.get(key, {"project": "项目文件", "records": "本地记录"}.get(key, key))
+            if key.endswith("_at"):
+                value = readable_time(value)
             if isinstance(value, (dict, list)):
                 lines.append(indent + label + "：")
                 lines.append(readable_report(value, depth + 1))
@@ -47,4 +67,4 @@ def readable_report(report: Any, depth: int = 0) -> str:
         return "否"
     if report is None:
         return "未知 / 未提供"
-    return str(report)
+    return {"project": "项目文件", "records": "本地记录", "vault": "Obsidian 笔记库", "agent": "工作 Agent"}.get(str(report), str(report))

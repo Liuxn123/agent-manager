@@ -8,25 +8,27 @@ import threading
 from ..domain import Resource, UserError
 from ..runtime import TaskContext
 from .local import required_directory
+from ..profiles import RECORD_NOTE, sources_for
 
 
 class AgentAdapter:
-    capabilities = frozenset({"observe", "start", "stop", "backup", "verify", "restore", "open"})
+    capabilities = frozenset({"observe", "start", "stop", "backup", "verify", "restore", "open", "records"})
 
     def __init__(self) -> None:
         self._processes: dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
 
     def observe(self, resource: Resource, context: TaskContext) -> dict:
-        root = required_directory(resource.options, "path")
+        components = sources_for(resource)
+        from pathlib import Path
         with self._lock:
             process = self._processes.get(resource.id)
             running = bool(process and process.poll() is None)
-        return {"engine": resource.options.get("engine", "通用 Agent"), "path": str(root),
+        return {"engine": resource.options.get("engine", "通用 Agent"), "components": [
+                {"label": item["label"], "path": item["path"], "exists": bool(item["path"] and Path(item["path"]).is_dir())} for item in components],
                 "state": "本工具启动的进程正在运行" if running else "没有本工具管理中的进程；外部进程状态未知",
                 "pid": process.pid if running else None,
-                "assets": {name: (root / name).exists() for name in ["AGENTS.md", "skills", "memory", "mcp.json"]},
-                "note": "首版管理资源、启动进程及加密目录备份；会话、Token 与任务编排由后续引擎适配器接入。"}
+                "note": RECORD_NOTE}
 
     def is_running(self, resource: Resource) -> bool:
         with self._lock:

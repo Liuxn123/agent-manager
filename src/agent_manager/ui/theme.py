@@ -15,7 +15,7 @@ def setup_theme(app) -> None:
 
 
 STYLE = """
-QWidget { font-family: 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px; color: #24323d; }
+QWidget { font-size: 13px; color: #24323d; }
 QMainWindow, QWidget#Content { background: #f4f6f8; }
 QWidget#Sidebar { background: #182d39; }
 QLabel#Brand { color: #f4f8fa; font-size: 22px; font-weight: 700; }

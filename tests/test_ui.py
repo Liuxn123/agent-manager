@@ -65,6 +65,7 @@ class UITests(unittest.TestCase):
         self.window.navigation.setCurrentRow(3)
         page = self.window.resource_pages[2]
         self.assertTrue(page.observe_button.isEnabled())
+
         callbacks = []
         identity = self.window.submit(resource, "observe", lambda context: {"okay": True},
             lambda result: callbacks.append((result, QThread.currentThread() == self.app.thread())))
@@ -76,6 +77,17 @@ class UITests(unittest.TestCase):
         self.assertEqual(callbacks, [({"okay": True}, True)])
         self.assertEqual(self.store.tasks()[0]["state"], "success")
         self.assertTrue(page.observe_button.isEnabled())
+
+    def test_reading_records_returns_content_without_persisting_it_in_task_history(self):
+        outcomes = []
+        self.window.submit(None, "浏览记录", lambda context: {"text": "fixture-private-conversation"}, outcomes.append, persist_result=False)
+        deadline = time.monotonic() + 10
+        while self.window.jobs and time.monotonic() < deadline:
+            QTest.qWait(20)
+        self.assertEqual(outcomes, [{"text": "fixture-private-conversation"}])
+        task = self.store.tasks()[0]
+        self.assertEqual(task["state"], "success")
+        self.assertNotIn("fixture-private-conversation", task["result"] + task["log"])
 
 
 if __name__ == "__main__":

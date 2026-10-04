@@ -38,7 +38,7 @@ def main() -> None:
         shutil.copytree(application, payload / application.name, symlinks=True)
         shutil.copy2(ROOT / "README.md", payload / "README.md")
         shutil.copy2(ROOT / "src/agent_manager/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
-        metadata = {"version": "0.1.0", "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version()}
+        metadata = {"version": "0.2.0", "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version()}
         (payload / "BUILD-INFO.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         name = ROOT / "dist" / f"AgentManager-{sys.platform}-{platform.machine()}"
         result = shutil.make_archive(str(name), "zip" if sys.platform == "win32" else "gztar", root_dir=payload)

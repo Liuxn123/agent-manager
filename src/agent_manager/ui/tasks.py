@@ -13,9 +13,10 @@ class TaskSignals(QObject):
 
 
 class Worker(QRunnable):
-    def __init__(self, identity: str, store: Store, operation: Operation) -> None:
+    def __init__(self, identity: str, store: Store, operation: Operation, persist_result: bool = True) -> None:
         super().__init__()
         self.identity, self.store, self.operation = identity, store, operation
+        self.persist_result = persist_result
         self.signals = TaskSignals()
         self.context = TaskContext(lambda message: store.append_log(identity, message))
 
@@ -28,7 +29,7 @@ class Worker(QRunnable):
             outcome = self.operation(self.context)
             report = outcome.summary if isinstance(outcome, RestorePlan) else outcome
             state = "success"
-            self.store.finish_task(self.identity, state, safe_result(report))
+            self.store.finish_task(self.identity, state, safe_result(report) if self.persist_result else {"note": "内容仅在窗口显示，没有复制到操作记录。"})
             self.context.log("任务完成。")
         except Cancelled as exc:
             state = "cancelled"

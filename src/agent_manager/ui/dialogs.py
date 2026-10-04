@@ -8,11 +8,12 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QTextEdit, QVBoxLayout, QWidget)
+    QTextEdit, QVBoxLayout, QWidget, QListWidget, QGroupBox)
 
 from ..domain import KINDS, Resource, RestorePlan, UserError
 from ..security import safe_result
 from .presentation import readable_report
+from ..profiles import ENGINES, RECORD_NOTE, discover_record_paths
 
 
 def choose_path(edit: QLineEdit, parent: QWidget, directory: bool = True) -> None:
@@ -72,13 +73,43 @@ class ResourceDialog(QDialog):
             self.form.addRow("服务范围", self.scope)
             note = "管理 Linux/systemd 服务器；使用 SSH Agent 或私钥，严格验证主机指纹。恢复只写入空目录，不自动启动网关。"
         else:
-            self.add_field("path", "资源目录", options.get("path", ""), "dir")
+            self.add_field("path", "项目文件夹（Agent 可不填）" if kind == "agent" else "项目文件夹", options.get("path", ""), "dir")
             self.add_field("exclude_dirs", "额外排除目录名", ", ".join(options.get("exclude_dirs", [])))
             if kind == "agent":
-                self.add_field("engine", "Agent 类型", options.get("engine", "通用 Agent"))
-                self.add_field("executable", "启动可执行文件", options.get("executable", ""), "file")
-                self.add_field("arguments", "启动参数 JSON 数组", json.dumps(options.get("arguments", []), ensure_ascii=False))
-            note = "项目、附件、配置与未提交文件将加密保存；依赖和缓存目录默认排除。备份前关闭写入程序，恢复到新目录。"
+                self.engine = QComboBox()
+                self.engine.addItems(ENGINES)
+                self.engine.setCurrentText(options.get("engine", "Codex") if not resource or options.get("engine") in ENGINES else "其他 Agent")
+                if not resource:
+                    self.fields["name"].setText("我的 Codex 资料")
+                def engine_changed(value):
+                    if not resource and self.fields["name"].text() in {KINDS[kind], *("我的 " + engine + " 资料" for engine in ENGINES)}:
+                        self.fields["name"].setText("我的 " + value + " 资料")
+                self.engine.currentTextChanged.connect(engine_changed)
+                self.form.addRow("使用哪个 Agent", self.engine)
+                self.record_paths = QListWidget()
+                self.record_paths.setMaximumHeight(105)
+                self.record_paths.addItems(options.get("record_paths", []))
+                self.form.addRow("本地记录 / 配置目录", self.record_paths)
+                controls = QWidget()
+                controls_layout = QHBoxLayout(controls)
+                controls_layout.setContentsMargins(0, 0, 0, 0)
+                for label, callback in [("自动找记录目录", self.discover_records), ("添加目录", self.add_record_path), ("移除选中目录", self.remove_record_path)]:
+                    control = QPushButton(label)
+                    control.clicked.connect(callback)
+                    controls_layout.addWidget(control)
+                self.form.addRow("", controls)
+                advanced = QGroupBox("可选：从管家启动 Agent（备份无需设置）")
+                advanced.setCheckable(True)
+                advanced.setChecked(bool(options.get("executable")))
+                advanced_form = QFormLayout(advanced)
+                saved_form = self.form
+                self.form = advanced_form
+                self.add_field("executable", "程序路径", options.get("executable", ""), "file")
+                self.add_field("arguments", "启动参数（JSON 数组）", json.dumps(options.get("arguments", []), ensure_ascii=False))
+                self.form = saved_form
+                self.form.addRow(advanced)
+                self.resize(760, 680)
+            note = ("选项目文件夹，保存代码与成果；再添加本地记录目录，保存聊天、配置和附件。备份前退出对应 Agent。" + RECORD_NOTE) if kind == "agent" else "代码、笔记、附件及未提交文件会一起加密备份。换电脑时恢复到新文件夹。"
         hint = QLabel(note)
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
@@ -97,6 +128,7 @@ class ResourceDialog(QDialog):
     def add_field(self, key: str, label: str, value: str = "", chooser: str = "") -> None:
         edit = QLineEdit(str(value))
         self.fields[key] = edit
+        edit.setAccessibleName(label)
         if chooser:
             row = QWidget()
             layout = QHBoxLayout(row)
@@ -134,10 +166,15 @@ class ResourceDialog(QDialog):
                     raise UserError("启动参数需要字符串 JSON 数组。")
                 options["arguments"] = arguments
             else:
-                if not options["path"]:
+                if self.kind != "agent" and not options["path"]:
                     raise UserError("请选择资源目录。")
                 options["exclude_dirs"] = [part.strip() for part in values["exclude_dirs"].split(",") if part.strip()]
                 if self.kind == "agent":
+                    options["engine"] = self.engine.currentText()
+                    options["record_paths"] = [self.record_paths.item(index).text() for index in range(self.record_paths.count())]
+                    options["portable_bundle"] = True
+                    if not options["path"] and not options["record_paths"]:
+                        raise UserError("请选择项目文件夹，或添加一个本地记录目录。")
                     arguments = json.loads(values["arguments"])
                     if not isinstance(arguments, list) or not all(isinstance(item, str) for item in arguments):
                         raise UserError("启动参数需要字符串 JSON 数组，例如 [\"-m\", \"my_agent\"]。")
@@ -147,6 +184,23 @@ class ResourceDialog(QDialog):
         except (UserError, ValueError, TypeError) as exc:
             QMessageBox.warning(self, "配置未保存", str(exc))
 
+    def discover_records(self) -> None:
+        paths = discover_record_paths(self.engine.currentText())
+        if not paths:
+            QMessageBox.information(self, "未找到记录目录", "可在原应用中查看数据保存位置，再用“添加目录”选择。WorkBuddy 的工作成果文件夹可填在“项目文件夹”中。")
+        existing = {self.record_paths.item(index).text() for index in range(self.record_paths.count())}
+        for path in paths:
+            if str(path) not in existing:
+                self.record_paths.addItem(str(path))
+
+    def add_record_path(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "选择保存聊天记录或配置的目录", str(Path.home()))
+        if path and path not in {self.record_paths.item(index).text() for index in range(self.record_paths.count())}:
+            self.record_paths.addItem(path)
+
+    def remove_record_path(self) -> None:
+        self.record_paths.takeItem(self.record_paths.currentRow())
+
 
 class PasswordDialog(QDialog):
     def __init__(self, parent: QWidget, creating: bool) -> None:
@@ -154,7 +208,7 @@ class PasswordDialog(QDialog):
         self.setWindowTitle("加密备份口令" if creating else "解锁备份")
         self.resize(480, 230)
         layout = QVBoxLayout(self)
-        hint = QLabel("口令用于加密资料，请另存于密码管理器。留空可使用本资源已保存的系统凭据。换电脑需要独立保存的口令。")
+        hint = QLabel(("设置一个备份口令，用来保护项目与记录。" if creating else "输入创建这份备份时使用的口令。") + "这不是 Agent 的登录密码。请单独保存口令，换电脑恢复时需要它。已为这项资料保存口令时，可以留空。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         form = QFormLayout()
@@ -227,7 +281,7 @@ class PlanDialog(QDialog):
         summary.setReadOnly(True)
         summary.setPlainText(readable_report(plan.summary))
         layout.addWidget(summary)
-        self.confirm = QCheckBox("已核对目标与恢复范围；本地 Hermes 已退出，相关写入程序已停止")
+        self.confirm = QCheckBox("已核对恢复位置，并退出正在写入这些资料的应用")
         layout.addWidget(self.confirm)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         apply = buttons.button(QDialogButtonBox.StandardButton.Ok)
@@ -239,3 +293,75 @@ class PlanDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+
+class TransferDialog(QDialog):
+    def __init__(self, parent: QWidget, report: dict, target: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("换电脑恢复 · 选择放在哪里")
+        self.resize(740, 470)
+        self.folder_fields = {}
+        layout = QVBoxLayout(self)
+        heading = QLabel(f"已解锁：{report['resource_name']}（{report['file_count']} 个文件）")
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+        hint = QLabel("选择一个新的总文件夹。项目文件和本地记录分别放在它里面；下方可以修改各自的文件夹名称。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        form = QFormLayout()
+        self.target = QLineEdit(target)
+        self.target.setAccessibleName("新电脑上的恢复总文件夹")
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(self.target)
+        choose = QPushButton("选择")
+        choose.clicked.connect(lambda: choose_path(self.target, self))
+        row_layout.addWidget(choose)
+        form.addRow("恢复总文件夹", row)
+        for item in report.get("components", []):
+            name = "项目文件" if item["role"] == "project" else ("本地记录" if item["id"] == "records" else "本地记录-" + item["id"])
+            edit = QLineEdit(name)
+            edit.setAccessibleName(item["label"] + "文件夹名称")
+            self.folder_fields[item["id"]] = edit
+            form.addRow(item["label"], edit)
+        layout.addLayout(form)
+        note = QLabel(RECORD_NOTE + "\n聊天记录查看支持本地文本、Markdown、JSON 和 JSONL；应用内部数据库保留原样。")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("查看恢复清单")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+class RecordsDialog(QDialog):
+    def __init__(self, window: QWidget, resource: Resource, report: dict) -> None:
+        super().__init__(window)
+        self.setWindowTitle(resource.name + " · 浏览本地记录")
+        self.resize(1000, 680)
+        layout = QVBoxLayout(self)
+        hint = QLabel("这是本机保存的记录，阅读不会改动原应用。数据库格式的记录请在原应用中查看。" + ("仅列出前 300 个文件。" if report.get("limited") else ""))
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.rows = report["records"]
+        self.files = QListWidget()
+        self.files.addItems([item["component"] + " · " + item["name"] for item in self.rows])
+        self.files.setMaximumHeight(180)
+        layout.addWidget(self.files)
+        self.text = QTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setPlainText("选择上方记录查看内容。" if self.rows else "没有找到可直接阅读的文本记录。资料仍可备份；请核对原应用的数据目录，或先从原应用导出记录。")
+        layout.addWidget(self.text, 1)
+        def select(row):
+            if row < 0:
+                return
+            from ..records import read_record
+            window.submit(resource, "读取本地记录", lambda context: read_record(resource, self.rows[row]["path"], context),
+                          lambda result: self.text.setPlainText(result["text"]) if self.isVisible() else None, persist_result=False)
+        self.files.currentRowChanged.connect(select)
+        close = QPushButton("关闭")
+        close.clicked.connect(self.accept)
+        layout.addWidget(close)
