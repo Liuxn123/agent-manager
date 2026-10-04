@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import zipfile
 from contextlib import contextmanager
@@ -273,7 +274,7 @@ def verify_archive(source: Path, password: str, context: TaskContext) -> dict:
 
 def plan_restore(resource: Resource, source: Path, target: Path, password: str, context: TaskContext) -> RestorePlan:
     target = target.expanduser().absolute()
-    check_target(target, source)
+    target = check_target(target, source)
     report = verify_archive(source, password, context)
     if report["resource_id"] != resource.id:
         raise UserError("此备份属于其他资源，请在对应资源下恢复。")
@@ -282,7 +283,21 @@ def plan_restore(resource: Resource, source: Path, target: Path, password: str, 
                         "note": "恢复到空目录；Git 历史保存在 .agent-manager-history.bundle，可手动克隆恢复仓库。"})
 
 
-def check_target(target: Path, source: Path) -> None:
+def canonical_system_path(target: Path) -> Path:
+    target = target.expanduser().absolute()
+    # macOS exposes immutable OS aliases /var, /tmp, /etc. Normalize only these
+    # exact well-known mappings; user-controlled symlinks remain forbidden.
+    if sys.platform == "darwin":
+        for name in ("var", "tmp", "etc"):
+            alias, actual = Path("/" + name), Path("/private/" + name)
+            if target.is_relative_to(alias) and alias.is_symlink() and alias.resolve() == actual:
+                target = actual / target.relative_to(alias)
+                break
+    return target
+
+
+def check_target(target: Path, source: Path) -> Path:
+    target = canonical_system_path(target)
     if is_link(target) or any(is_link(parent) for parent in target.parents):
         raise UserError("恢复目标不能包含符号链接或目录联接。")
     resolved = target.resolve()
@@ -290,6 +305,7 @@ def check_target(target: Path, source: Path) -> None:
         raise UserError("恢复目标不能是磁盘根目录或包含备份文件。")
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise UserError("首版只恢复到新目录或空目录，请选择其他目标。")
+    return target
 
 
 def apply_restore(plan: RestorePlan, password: str, context: TaskContext) -> dict:

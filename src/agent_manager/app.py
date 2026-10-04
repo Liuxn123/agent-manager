@@ -45,6 +45,14 @@ def main(argv: list[str] | None = None) -> int:
         lock.unlock()
         return result
     except Exception as exc:
+        if options.smoke_test:
+            if options.data_dir:
+                import json
+                import traceback
+                options.data_dir.mkdir(parents=True, exist_ok=True)
+                frames = [{"file": Path(frame.filename).name, "line": frame.lineno, "function": frame.name} for frame in traceback.extract_tb(exc.__traceback__)]
+                (options.data_dir / "startup-error.json").write_text(json.dumps({"error_type": type(exc).__name__, "frames": frames}), encoding="utf-8")
+            return 3
         QMessageBox.critical(None, "启动失败", f"无法初始化本机数据目录，请检查路径与权限。（{type(exc).__name__}）")
         return 1
 

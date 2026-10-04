@@ -41,19 +41,8 @@ jobs:
           python -m unittest discover -s tests -v
       - name: Build
         run: python scripts/build.py
-      - name: Validate frozen package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $taskProcess = Start-Process -FilePath 'dist/AgentManager/AgentManager.exe' -ArgumentList '--data-dir', 'build/smoke-data', '--smoke-test', '--screenshot', 'build/smoke.png' -WindowStyle Hidden -Wait -PassThru
-          if ($taskProcess.ExitCode -ne 0) { throw 'Frozen application startup failed' }
-          if (-not (Test-Path -LiteralPath 'build/smoke.png')) { throw 'Startup screenshot missing' }
-      - name: Validate frozen package (Linux)
-        if: runner.os == 'Linux'
-        run: dist/AgentManager/AgentManager --data-dir build/smoke-data --smoke-test --screenshot build/smoke.png
-      - name: Validate frozen package (macOS)
-        if: runner.os == 'macOS'
-        run: dist/AgentManager.app/Contents/MacOS/AgentManager --data-dir build/smoke-data --smoke-test --screenshot build/smoke.png
+      - name: Validate frozen package
+        run: python scripts/smoke_package.py
       - uses: actions/upload-artifact@v7
         with:
           name: AgentManager-${{ matrix.os }}

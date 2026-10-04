@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from ..archives import is_link
+from ..archives import canonical_system_path, is_link
 from ..domain import Resource, RestorePlan, UserError
 from ..runtime import TaskContext, json_result, run_process
 
@@ -62,7 +62,7 @@ class LocalHermesAdapter:
         configured_home = str(resource.options.get("home", "")).strip()
         if not configured_home:
             raise UserError("请配置 Hermes 运行目录。")
-        home = Path(configured_home).expanduser().absolute()
+        home = canonical_system_path(Path(configured_home))
         if is_link(home) or any(is_link(parent) for parent in home.parents) or (home.exists() and not home.is_dir()):
             raise UserError("运行目录不安全，不能使用链接或文件作为运行根。")
         home = home.resolve()
