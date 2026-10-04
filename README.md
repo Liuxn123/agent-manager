@@ -20,7 +20,7 @@
 
 ### 下载运行包
 
-私有仓库：`https://github.com/Liuxn123/agent-manager`。仓库所有者登录后从 Actions 的 **Desktop CI and packages** 获取对应系统的构建产物。包内有 README 与构建信息。
+私有仓库：[Agent Manager](https://github.com/Liuxn123/agent-manager)。登录后从 [版本下载页](https://github.com/Liuxn123/agent-manager/releases) 获取对应系统的运行包；最新测试构建也可在 Actions 的 **Desktop CI and packages** 中下载。包内有 README 与构建信息。
 
 - Windows：解压整包后打开 `AgentManager/AgentManager.exe`。
 - macOS：解压后打开 `AgentManager.app`；未签名构建需通过系统提供的“仍要打开”入口授权，不要求关闭系统保护。
