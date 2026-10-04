@@ -108,7 +108,7 @@ python scripts/build.py
 
 构建会生成目录包及压缩包。CI 在 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 上测试、构建并执行打包程序启动检查。不同系统分别打包，不能用 Windows exe 在 macOS/Linux 运行；其他硬件/旧操作系统受 Qt 与依赖支持范围限制。
 
-Windows 构建会隔离 DLL 搜索路径，避免 PATH 中其他工具的 ICU/系统 DLL 混入。压缩包每次从全新暂存目录生成。Intel macOS 使用 `OPENSSL_STATIC=1` 从源码构建当前 cryptography（首次安装加 `--no-cache-dir --no-binary=cryptography`），避免 Homebrew OpenSSL 与 Python 自带库发生冲突；CI 已配置此步骤。
+Windows 构建会隔离 DLL 搜索路径，避免 PATH 中其他工具的 ICU/系统 DLL 混入。压缩包每次从全新暂存目录生成，并保留 macOS app 内部链接。Intel macOS 使用 `OPENSSL_STATIC=1` 从源码构建当前 cryptography（首次安装加 `--no-cache-dir --no-binary=cryptography`），避免 Homebrew OpenSSL 与 Python 自带库发生冲突；CI 已配置此步骤。启动检查直接解压并运行最终压缩包，而不是只检查构建目录。
 
 UI 验证：`QT_QPA_PLATFORM=offscreen python -m agent_manager --data-dir /tmp/test-data --smoke-test --screenshot /tmp/window.png`。测试全部使用临时目录和测试进程，不连接生产服务器、不覆盖真实运行资料。
 

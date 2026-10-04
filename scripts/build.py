@@ -35,7 +35,7 @@ def main() -> None:
     # produced by a subsequent build.
     with tempfile.TemporaryDirectory(prefix="package-", dir=ROOT / "build") as temporary:
         payload = Path(temporary)
-        shutil.copytree(application, payload / application.name)
+        shutil.copytree(application, payload / application.name, symlinks=True)
         shutil.copy2(ROOT / "README.md", payload / "README.md")
         shutil.copy2(ROOT / "src/agent_manager/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
         metadata = {"version": "0.1.0", "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version()}
