@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': '设置页改为简单表单：常用内容只保留备份位置、保留数量和可选口令库；导入导出、环境检查等默认折叠。\n\n新增程序内离线使用说明，按工作台、本地 Hermes、服务器 Hermes、项目与 Obsidian、其他 Agent、备份与迁移、活动记录、设置分模块跳转。运行包也附带独立的使用说明.md。\n\n补充同类工具调研与功能建议，清楚区分当前已有能力和未来建议。备份与恢复沿用原有流程。\n\n四个平台通过测试、运行包解压启动和便携目录移动检查。复制整个便携目录，保留 data、backups 和恢复资料。外部目录及 SSH 密钥需要在新电脑重新选择。自动备份仅在管家打开且资源已开启时执行；可选口令库需要自行创建主口令。具体说明见 README。'})
+            'body': '本地项目主入口改为规范项目管理：选择已有 projects.json v2 工作区或初始化空工作区，按 P-YYYY-NNN 编号创建项目，查看和编辑 STATUS/TASKS，向 HANDOFF 追加日志。\n\n新增归档与重新启用：预检来源、目标、文件清单和 Obsidian 入口，移动后验证文件，保留编号并更新登记表、状态、交接与生成索引。原备份功能保留在“资料备份与 Obsidian”页签。使用说明已更新。\n\n归档是目录移动，不代表备份或验收成功。旧 L-归档保持只读；项目内联接/符号链接、目标冲突、跨文件系统和变化中的文件会阻断移动。中途失败保留现场与移动记录，禁止盲目重试。业务文件里的绝对路径、Git 与同步设置需要自行核对。\n\n四个平台通过测试、运行包解压启动和便携目录移动检查。复制完整便携目录并保留 data、backups。实际项目工作区和 SSH 文件位于外部时需要单独携带；同一同步工作区不要在多台电脑同时分配编号。'})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

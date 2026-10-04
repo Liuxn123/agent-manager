@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("Navigation")
         self.navigation.setIconSize(QSize(22, 22))
-        for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "项目与 Obsidian", "其他 Agent", "备份与迁移", "活动记录", "设置"]):
+        for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "本地项目", "其他 Agent", "备份与迁移", "活动记录", "设置"]):
             self.navigation.addItem(QListWidgetItem(nav_icon(index), label))
         sidebar_layout.addWidget(self.navigation, 1)
         help_button = button("使用说明", self.show_guide)
@@ -283,7 +283,12 @@ class MainWindow(QMainWindow):
             ("其他工作 Agent", "备份 Codex、WorkBuddy 等的项目文件和本地记录；换电脑时一起恢复。", ["agent"])]:
             page = ResourcePage(self, title, subtitle, kinds)
             self.resource_pages.append(page)
-            self.stack.addWidget(page)
+            if kinds == ["project", "vault"]:
+                from .projects import ProjectPage
+                self.project_page = ProjectPage(self, page)
+                self.stack.addWidget(self.project_page)
+            else:
+                self.stack.addWidget(page)
         self.build_backups()
         self.build_tasks()
         self.build_settings()
@@ -612,6 +617,8 @@ class MainWindow(QMainWindow):
         resource = self.dashboard_resources[index.row()]
         page_index = {"hermes_local": 1, "hermes_server": 2, "project": 3, "vault": 3, "agent": 4}[resource.kind]
         self.navigation.setCurrentRow(page_index)
+        if page_index == 3:
+            self.project_page.tabs.setCurrentIndex(1)
         page = self.resource_pages[page_index - 1]
         row = next((i for i, item in enumerate(page.rows) if item.id == resource.id), None)
         if row is not None:
@@ -926,6 +933,8 @@ class MainWindow(QMainWindow):
                             QMessageBox.warning(self, "资料已恢复，口令未保存", str(exc))
                     self.refresh_resources()
                     self.navigation.setCurrentRow(4 if new_resource.kind == "agent" else 3)
+                    if new_resource.kind != "agent":
+                        self.project_page.tabs.setCurrentIndex(1)
                     for page in self.resource_pages:
                         row = next((i for i, item in enumerate(page.rows) if item.id == new_resource.id), None)
                         if row is not None:
