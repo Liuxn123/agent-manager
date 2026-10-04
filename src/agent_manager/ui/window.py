@@ -26,7 +26,7 @@ from ..profiles import restored_resource, sources_for
 from .tasks import Worker
 from .presentation import ACTION_LABELS, readable_report, readable_time, readable_size
 from .components import nav_icon, card, FlowLayout, ReadableTable
-from ..maintenance import backup_health, activity_summary, is_due, fingerprint, age_hours
+from ..maintenance import backup_health, is_due, fingerprint, age_hours
 from ..storage import now
 
 STATE_LABELS = {"running": "运行中", "success": "已完成", "failed": "失败", "cancelled": "已取消", "interrupted": "中断待检查"}
@@ -327,8 +327,8 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("Navigation")
         self.navigation.setIconSize(QSize(22, 22))
-        for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "本地项目", "其他 Agent", "备份与迁移", "活动记录", "设置"]):
-            self.navigation.addItem(QListWidgetItem(nav_icon(index), label))
+        for index, label in enumerate(["工作台", "本地 Hermes", "服务器 Hermes", "本地项目", "其他 Agent", "技能与工具", "备份与迁移", "活动记录", "设置"]):
+            self.navigation.addItem(QListWidgetItem(nav_icon(4 if index == 5 else index if index < 5 else index - 1), label))
         sidebar_layout.addWidget(self.navigation, 1)
         help_button = button("使用说明", self.show_guide)
         help_button.setObjectName("SidebarHelp")
@@ -364,6 +364,9 @@ class MainWindow(QMainWindow):
                 self.stack.addWidget(self.project_page)
             else:
                 self.stack.addWidget(page)
+        from .assets import AssetPage
+        self.asset_page = AssetPage(self)
+        self.stack.addWidget(self.asset_page)
         self.build_backups()
         self.build_tasks()
         self.build_settings()
@@ -419,8 +422,8 @@ class MainWindow(QMainWindow):
         body_layout.addLayout(grid)
         actions = QHBoxLayout()
         actions.addWidget(button("检查全部状态", self.observe_all))
-        actions.addWidget(button("搜索本地记录", self.search_records))
-        actions.addWidget(button("换电脑恢复", self.import_backup))
+        actions.addWidget(button("查看最近备份", lambda: self.navigation.setCurrentRow(6)))
+        actions.addWidget(button("换电脑恢复", lambda: self.navigation.setCurrentRow(6)))
         actions.addStretch()
         body_layout.addLayout(actions)
         row = QHBoxLayout()
@@ -437,35 +440,24 @@ class MainWindow(QMainWindow):
         self.health_table.setMaximumHeight(340)
         self.health_table.doubleClicked.connect(self.open_dashboard_resource)
         body_layout.addWidget(self.health_table)
-        activity = QFrame()
-        activity.setObjectName("Card")
-        activity_layout = QVBoxLayout(activity)
-        activity_layout.setContentsMargins(20, 16, 20, 16)
-        self.activity_hint = QLabel("最近 7 天 · 管家活动")
-        self.activity_hint.setObjectName("SectionTitle")
-        activity_layout.addWidget(self.activity_hint)
-        trend = QHBoxLayout()
-        self.trend_labels = []
-        self.trend_bars = []
-        for index in range(7):
-            column = QVBoxLayout()
-            number = QLabel("0")
-            number.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            column.addWidget(number)
-            column.addStretch()
-            bar = QFrame()
-            bar.setObjectName("TrendBar")
-            bar.setFixedHeight(4)
-            column.addWidget(bar)
-            date = QLabel("")
-            date.setObjectName("Subtitle")
-            date.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            column.addWidget(date)
-            trend.addLayout(column, 1)
-            self.trend_labels.append((number, date))
-            self.trend_bars.append(bar)
-        activity_layout.addLayout(trend)
-        body_layout.addWidget(activity)
+        panels = QHBoxLayout()
+        self.pending_items = QListWidget()
+        self.latest_backups = QListWidget()
+        for title, view in [("需要你处理", self.pending_items), ("最近备份", self.latest_backups)]:
+            panel = QFrame()
+            panel.setObjectName("Card")
+            pane = QVBoxLayout(panel)
+            heading = QLabel(title)
+            heading.setObjectName("SectionTitle")
+            pane.addWidget(heading)
+            view.setWordWrap(True)
+            view.setObjectName("ActionList")
+            view.setMinimumHeight(110)
+            view.setMaximumHeight(140)
+            view.itemDoubleClicked.connect(self.open_dashboard_item)
+            pane.addWidget(view)
+            panels.addWidget(panel, 1)
+        body_layout.insertLayout(3, panels)
         body_layout.addStretch()
         scroll.setWidget(body)
         layout.addWidget(scroll, 1)
@@ -477,17 +469,17 @@ class MainWindow(QMainWindow):
         title = QLabel("备份与换电脑")
         title.setObjectName("Title")
         layout.addWidget(title)
-        hint = QLabel("换电脑：复制 .amb 备份文件 → 点击“从备份文件恢复” → 输入备份口令 → 选择新文件夹。无需先导入资源配置。Hermes 原生恢复请到对应 Hermes 页面。")
+        hint = QLabel("恢复已备份的项目、笔记、聊天文件、数据库和附件，并重新登记新路径。不会安装原应用或恢复云端独有记录；续聊与登录需在原应用核对。Hermes 原生恢复请到对应页面。")
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
         layout.addWidget(hint)
-        bar = QHBoxLayout()
+        bar = FlowLayout()
         bar.addWidget(button("刷新备份列表", self.refresh_backups))
         bar.addWidget(button("恢复选中备份…", self.restore_selected_backup, True))
         bar.addWidget(button("从备份文件恢复", self.import_backup))
         bar.addWidget(button("恢复演练", self.rehearse_selected_backup))
         bar.addWidget(button("打开备份目录", lambda: self.open_path(self.service.backup_root())))
-        bar.addStretch()
+        bar.addWidget(button("能恢复什么", self.show_restore_scope))
         layout.addLayout(bar)
         repository_bar = QHBoxLayout()
         self.agent_repository_label = QLabel()
@@ -502,6 +494,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.backup_table)
         self.backup_rows: list[tuple[Resource, dict]] = []
         self.stack.addWidget(page)
+
+    def show_restore_scope(self) -> None:
+        from .help import guide_path
+        from .library import TextReportDialog
+        path = guide_path().with_name("RESTORE_SCOPE.md")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            text = "说明文件缺失，请重新解压完整运行包。"
+        TextReportDialog(self, "换电脑恢复 · 范围与验证", {"text": text, "note": "先恢复资料，再在原应用核对路径与登录。"}).exec()
 
     def refresh_agent_repository(self) -> None:
         path = self.store.setting("agent_backup_repository", "")
@@ -553,98 +555,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(page)
 
     def build_settings(self) -> None:
-        page = QWidget()
-        page.setObjectName("SettingsPage")
-        layout = QVBoxLayout(page)
-        layout.setSpacing(14)
-        heading = QHBoxLayout()
-        title = QLabel("设置")
-        title.setObjectName("Title")
-        heading.addWidget(title)
-        heading.addStretch()
-        heading.addWidget(button("使用说明", self.show_guide))
-        layout.addLayout(heading)
-        hint = QLabel("通常只需要选择备份位置。其他选项可以保持默认。")
-        hint.setWordWrap(True)
-        hint.setObjectName("Subtitle")
-        layout.addWidget(hint)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        body.setObjectName("SettingsBody")
-        fields = QVBoxLayout(body)
-        fields.setContentsMargins(0, 6, 0, 0)
-        fields.setSpacing(18)
-        form = QFormLayout()
-        form.setSpacing(12)
-        row = QHBoxLayout()
-        self.backup_path = QLineEdit(str(self.service.backup_root()))
-        row.addWidget(self.backup_path, 1)
-        row.addWidget(button("选择", lambda: choose_path(self.backup_path, self)))
-        form.addRow("备份保存位置", row)
-        policy = QHBoxLayout()
-        self.backup_keep = QSpinBox()
-        self.backup_keep.setRange(1, 100)
-        self.backup_keep.setValue(int(self.store.setting("backup_keep", 10)))
-        policy.addWidget(self.backup_keep)
-        policy.addWidget(QLabel("份（自动备份成功后清理旧版本）"))
-        policy.addStretch()
-        form.addRow("每项自动备份保留", policy)
-        fields.addLayout(form)
-        note = QLabel("自动备份在各项资料的“编辑”中开启，只有管家打开时才会执行。")
-        note.setObjectName("Subtitle")
-        note.setWordWrap(True)
-        fields.addWidget(note)
-        save = QHBoxLayout()
-        save.addWidget(button("保存设置", self.save_settings, True))
-        save.addStretch()
-        fields.addLayout(save)
-        if self.store.portable_root:
-            line = QFrame()
-            line.setFrameShape(QFrame.Shape.HLine)
-            fields.addWidget(line)
-            self.vault_status = QLabel()
-            fields.addWidget(self.vault_status)
-            vault = QHBoxLayout()
-            self.vault_unlock_button = button("解锁口令库", self.unlock_vault)
-            vault.addWidget(self.vault_unlock_button)
-            vault.addWidget(button("锁定口令库", self.lock_vault))
-            vault.addStretch()
-            fields.addLayout(vault)
-            self.refresh_vault_status()
-            vault_hint = QLabel("可选：记住各项备份口令。主口令请另存；关闭管家后会自动锁定。")
-            vault_hint.setWordWrap(True)
-            vault_hint.setObjectName("Subtitle")
-            fields.addWidget(vault_hint)
-        self.settings_advanced_toggle = QToolButton()
-        self.settings_advanced_toggle.setText("更多设置")
-        self.settings_advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.settings_advanced_toggle.setCheckable(True)
-        self.settings_advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
-        fields.addWidget(self.settings_advanced_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.settings_advanced = QWidget()
-        advanced = QVBoxLayout(self.settings_advanced)
-        advanced.setContentsMargins(0, 0, 0, 0)
-        tools = QGridLayout()
-        for index, widget in enumerate([
-            button("导出资源配置", self.export_config), button("导入资源配置", self.import_config),
-            button("检查运行环境", self.diagnostics), button("移除保存的备份口令", self.remove_secret),
-            button("打开管家数据目录", lambda: self.open_path(self.store.root)),
-        ]):
-            tools.addWidget(widget, index // 2, index % 2)
-        advanced.addLayout(tools)
-        self.settings_info = text_view()
-        self.settings_info.setMinimumHeight(130)
-        self.settings_info.setMaximumHeight(180)
-        self.settings_info.setPlainText("管家数据：" + str(self.store.root) + "\n\n配置导出只保存登记清单，不包含项目文件、聊天记录、口令或 SSH 私钥。完整迁移请查看使用说明。")
-        advanced.addWidget(self.settings_info)
-        fields.addWidget(self.settings_advanced)
-        self.settings_advanced.hide()
-        self.settings_advanced_toggle.toggled.connect(self.toggle_settings_advanced)
-        fields.addStretch()
-        scroll.setWidget(body)
-        layout.addWidget(scroll, 1)
-        self.stack.addWidget(page)
+        from .settings import build_settings
+        build_settings(self)
 
     def toggle_settings_advanced(self, expanded: bool) -> None:
         self.settings_advanced.setVisible(expanded)
@@ -659,8 +571,8 @@ class MainWindow(QMainWindow):
             return
         secrets = self.service.secrets
         exists = secrets.vault and secrets.vault.exists()
-        self.vault_status.setText("备份口令库：" + ("已解锁" if secrets.unlocked else "已锁定" if exists else "尚未创建（可选）"))
-        self.vault_unlock_button.setText("解锁口令库" if exists else "创建口令库")
+        self.vault_status.setText("密码记忆：" + ("已解锁" if secrets.unlocked else "已锁定" if exists else "未设置，备份时手动输入即可"))
+        self.vault_unlock_button.setText("输入总密码解锁" if exists else "开启记住密码")
 
     def is_busy(self, identity: str) -> bool:
         return any(resource_id == identity for _, resource_id, _ in self.jobs.values())
@@ -712,13 +624,48 @@ class MainWindow(QMainWindow):
                 self.health_table.setItem(row, column, item)
         self.health_hint.setText(f"{attention} 项待备份或验证 · 双击查看")
         self.overview_info.setText(f"{len(self.dashboard_resources)} 项资料已登记 · {'便携模式，随 U 盘带走' if self.store.portable_root else '所有参数保存在本机'}")
-        summary = activity_summary(self.store.tasks(500))
-        self.activity_hint.setText(f"最近 7 天 · 管家活动          今日完成 {summary['successful']} 项 · 待检查 {summary['failed']} 项")
-        maximum = max(1, *(count for date, count in summary["trend"]))
-        for (number, date_label), bar, (date, count) in zip(self.trend_labels, self.trend_bars, summary["trend"]):
-            number.setText(str(count))
-            date_label.setText(date)
-            bar.setFixedHeight(max(4, int(count / maximum * 34)))
+        self.pending_items.clear()
+        self.latest_backups.clear()
+        recent = []
+        for resource in self.dashboard_resources:
+            health = backup_health(self.store, resource, self.service.backup_root())
+            tasks = self.store.tasks(limit=1, resource_id=resource.id)
+            failed = bool(tasks and tasks[0]["state"] in {"failed", "interrupted"})
+            reason = ""
+            if failed:
+                reason = "最近操作未完成，查看原因"
+            elif health["state"] not in {"已校验", "已演练"}:
+                reason = {"未备份": "还没有备份", "已过期": "备份较旧，有变化就再备份", "待校验": "备份需要校验"}.get(health["state"], "检查备份是否可用")
+            if reason:
+                item = QListWidgetItem(resource.name + "\n" + reason)
+                item.setData(Qt.ItemDataRole.UserRole, (resource.id, failed))
+                self.pending_items.addItem(item)
+            if health.get("created_at"):
+                recent.append((str(health["created_at"]), resource, health["state"]))
+        for timestamp, resource, state in sorted(recent, key=lambda entry: entry[0], reverse=True)[:5]:
+            item = QListWidgetItem(resource.name + "\n" + readable_time(timestamp) + " · " + state)
+            item.setData(Qt.ItemDataRole.UserRole, (resource.id, "backup"))
+            self.latest_backups.addItem(item)
+        if not self.pending_items.count():
+            self.pending_items.addItem("当前没有待处理的备份或失败操作。")
+        if not self.latest_backups.count():
+            self.latest_backups.addItem("还没有备份。选中资料后点击“立即备份”。")
+
+    def open_dashboard_item(self, item) -> None:
+        target = item.data(Qt.ItemDataRole.UserRole)
+        if not target:
+            return
+        resource = next((r for r in self.dashboard_resources if r.id == target[0]), None)
+        if resource:
+            if target[1] == "backup":
+                self.navigation.setCurrentRow(6)
+                row = next((index for index, (owner, _) in enumerate(self.backup_rows) if owner.id == resource.id), None)
+                if row is not None:
+                    self.backup_table.selectRow(row)
+            elif target[1]:
+                self.show_resource_activity(resource)
+            else:
+                self.open_dashboard_resource(self.health_table.model().index(self.dashboard_resources.index(resource), 0))
 
     def open_dashboard_resource(self, index) -> None:
         resource = self.dashboard_resources[index.row()]
@@ -744,11 +691,12 @@ class MainWindow(QMainWindow):
         if self.jobs:
             QMessageBox.information(self, "任务运行中", "请在任务结束后更改口令库状态。")
             return
-        password, ok = QInputDialog.getText(self, "便携口令库", "输入主口令（首次设置至少 8 个字符，需单独保存）", QLineEdit.EchoMode.Password)
+        exists = self.service.secrets.vault and self.service.secrets.vault.exists()
+        password, ok = QInputDialog.getText(self, "记住备份密码", "输入总密码，解锁已记住的备份密码" if exists else "设置一个总密码，保护保存的备份密码（至少 8 个字符，请单独记住）", QLineEdit.EchoMode.Password)
         if not ok or not password:
             return
         if self.service.secrets.vault and not self.service.secrets.vault.exists():
-            confirm, ok = QInputDialog.getText(self, "确认主口令", "再次输入主口令", QLineEdit.EchoMode.Password)
+            confirm, ok = QInputDialog.getText(self, "确认总密码", "再输入一次刚才设置的总密码", QLineEdit.EchoMode.Password)
             if not ok or confirm != password:
                 QMessageBox.warning(self, "未解锁", "两次主口令不一致。")
                 return
@@ -1090,7 +1038,7 @@ class MainWindow(QMainWindow):
         self.task_details()
 
     def show_resource_activity(self, resource: Resource) -> None:
-        self.navigation.setCurrentRow(6)
+        self.navigation.setCurrentRow(7)
         self.task_filter.setCurrentIndex(self.task_filter.findData(resource.id))
         self.refresh_tasks()
 
@@ -1113,8 +1061,10 @@ class MainWindow(QMainWindow):
 
     def page_changed(self, index: int) -> None:
         if index == 5:
-            self.refresh_backups()
+            self.asset_page.refresh()
         elif index == 6:
+            self.refresh_backups()
+        elif index == 7:
             self.refresh_tasks()
 
     def refresh_backups(self) -> None:
@@ -1159,6 +1109,18 @@ class MainWindow(QMainWindow):
         self.store.set_setting("backup_root", str(Path(value).expanduser().resolve()))
         self.store.set_setting("backup_keep", self.backup_keep.value())
         self.statusBar().showMessage("设置已保存")
+
+    def change_backup_location(self) -> None:
+        if self.jobs:
+            QMessageBox.information(self, "任务运行中", "请等待任务完成后再更改位置。")
+            return
+        directory = QFileDialog.getExistingDirectory(self, "以后创建的备份放在哪里", str(self.service.backup_root()))
+        if directory:
+            self.backup_path.setText(directory)
+            self.save_settings()
+            self.backup_location.setPlainText(str(self.service.backup_root()))
+            self.refresh_backups()
+            self.refresh_dashboard()
 
     def export_config(self) -> None:
         destination = QFileDialog.getSaveFileName(self, "导出资源配置", "agent-manager-resources.json", "JSON (*.json)")[0]
@@ -1218,7 +1180,7 @@ class MainWindow(QMainWindow):
     def diagnostics(self) -> None:
         def show(report):
             self.settings_info.setPlainText("本机数据目录：" + report["data_directory"] + "\n\n可用工具：\n" + "\n".join(name + "：" + value for name, value in report["tools"].items()) + "\n\n普通项目和工作 Agent 备份无需单独配置 Python；Hermes 原生备份需要其工具环境。")
-            self.navigation.setCurrentRow(7)
+            self.navigation.setCurrentRow(8)
             self.settings_advanced_toggle.setChecked(True)
         self.submit(None, "检查运行依赖", lambda context: self.service.diagnostics(), show)
 

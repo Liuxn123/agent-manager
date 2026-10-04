@@ -50,7 +50,7 @@ class UITests(unittest.TestCase):
         from PySide6.QtGui import QRawFont
         self.assertTrue(QRawFont.fromFont(self.app.font()).supportsCharacter(ord("恢")))
         self.window.resize(960, 660)
-        for index in range(8):
+        for index in range(9):
             self.window.navigation.setCurrentRow(index)
             self.app.processEvents()
             self.assertEqual(self.window.stack.currentIndex(), index)
@@ -159,7 +159,7 @@ class UITests(unittest.TestCase):
         repository = self.root / "agent-backups"
         self.store.set_setting("agent_backup_repository", str(repository))
         self.window.refresh_agent_repository()
-        self.window.navigation.setCurrentRow(5)
+        self.window.navigation.setCurrentRow(6)
         self.window.resize(960, 660)
         self.app.processEvents()
         self.assertIn(str(repository), self.window.agent_repository_label.text())

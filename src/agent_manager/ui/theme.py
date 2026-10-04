@@ -23,9 +23,11 @@ QWidget#Sidebar { background: #151d35; }
 QLabel#Brand { color: #ffffff; font-size: 23px; font-weight: 700; }
 QLabel#BrandSub { color: #8e9abb; font-size: 11px; }
 QListWidget#Navigation { background: transparent; border: none; color: #b3bdd5; outline: none; }
-QListWidget#Navigation::item { padding: 10px 12px; margin: 3px 0px; border-radius: 6px; }
+QListWidget#Navigation::item { padding: 8px 12px; margin: 2px 0px; border-radius: 6px; }
 QListWidget#Navigation::item:selected { background: #303f72; color: #ffffff; }
 QListWidget#Navigation::item:hover { background: #222d4b; }
+QListWidget#ActionList { background: #ffffff; border: none; }
+QListWidget#ActionList::item { padding: 5px; border-bottom: 1px solid #edf0f6; }
 QLabel#Title { color: #17213b; font-size: 27px; font-weight: 700; }
 QLabel#Subtitle { color: #7a849c; }
 QLabel#SectionTitle { color: #27334f; font-size: 15px; font-weight: 600; }

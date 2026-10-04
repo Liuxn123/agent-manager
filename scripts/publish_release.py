@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': "管理页优化：资源名称与长路径完整换行，按实际文字高度调整行高，操作按钮随窗口宽度换行。“恢复…”改为“恢复备份”。新增完整目录查看、复制与本地文件夹快捷入口，所选资源的最近操作和活动记录筛选。\n\n本地 Hermes 新增“会话与技能”：搜索近期会话标题与来源、查看最近用户/助手消息，搜索和阅读 SKILL.md。服务器新增“网关日志”，通过已有 SSH 读取登记的 systemd 服务最近 80 行；其他工作 Agent 新增直接搜索记录入口。查看内容不保存到管家任务结果，原有备份、恢复、规范项目与 Obsidian 管理流程保留。\n\n便携模式与简洁设置保留，使用说明已更新。Windows、Linux、macOS Apple Silicon 与 Intel 构建均执行测试、打包、解压启动及便携迁移验证。"})
+            'body': '设置默认只保留备份位置、打开与更换按钮；工作台移除全局记录搜索和七天活动图，改为需要处理的事项与最近备份。\n\n新增独立“技能与工具”：统一查看 Skills、MCP 与提示词，导入及复制本地技能，新建编辑通用提示词；MCP 清单仅查看，不自动改写原配置或启用工具。通用库随便携目录携带，可用现有加密流程备份。\n\n保留管理页长文字完整换行、Hermes 会话与技能浏览、服务器网关日志及按资源操作记录。备份页加入恢复范围说明；图形界面数据恢复测试核对中文文件、聊天、附件、SQLite 与自动登记。原软件安装、登录和会话接续仍需在原应用确认。\n\nWindows、Linux、macOS Apple Silicon 与 Intel 均完成测试、打包、解压启动和便携目录迁移验证。更新时保留原 data、backups 与恢复资料。'})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

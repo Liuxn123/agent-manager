@@ -61,10 +61,14 @@ class HermesLibraryTests(unittest.TestCase):
             self.assertIn("committed-wal-message", read_item(self.resource, "session", "visible", self.context)["text"])
 
     def test_remote_logs_redact_credentials(self):
-        with patch.object(ServerHermesAdapter, "_run", return_value={"text": "password=fixture-secret\nGateway ready"}) as run:
+        text = ('password=fixture-secret\nwss://example.test/ws?device_id=123&access_key=fixture-access-key&service_id=7&ticket=fixture-ticket\n'
+                'Authorization: Bearer fixture-bearer-token\n{"secret": "fixture secret with spaces", "state": "ready"}\nGateway ready')
+        with patch.object(ServerHermesAdapter, "_run", return_value={"text": text}) as run:
             result = ServerHermesAdapter().logs(Resource("Server", "hermes_server"), self.context)
         self.assertEqual(run.call_args.args[1], "logs")
-        self.assertNotIn("fixture-secret", result["text"])
+        for value in ("fixture-secret", "fixture-access-key", "fixture-ticket", "fixture-bearer-token", "fixture secret with spaces"):
+            self.assertNotIn(value, result["text"])
+        self.assertIn("service_id=7", result["text"])
         self.assertIn("Gateway ready", result["text"])
 
     def test_server_log_command_is_scoped_bounded_and_cannot_change_service(self):

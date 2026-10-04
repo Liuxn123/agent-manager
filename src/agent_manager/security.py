@@ -9,13 +9,16 @@ from typing import Any
 
 from .domain import UserError
 
-SENSITIVE = re.compile(r"(?i)(password|passphrase|secret|token|api[_-]?key|authorization|credential)")
+SENSITIVE = re.compile(r"(?i)(password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential)")
 
 
 def redact(text: str) -> str:
     text = re.sub(r"-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----", "[已隐藏私钥]", text)
     text = re.sub(r"(?i)(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{12,})", "[已隐藏凭据]", text)
-    text = re.sub(r"(?i)((?:password|passphrase|token|api[_-]?key|authorization)\s*[=:]\s*)[^\s,;]+", r"\1[已隐藏]", text)
+    keys = r"password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|ticket"
+    # Quoted JSON/YAML values may contain spaces; HTTP headers include a scheme.
+    text = re.sub(r"(?i)(\bauthorization[\"']?\s*[=:]\s*)[^\r\n]+", r"\1[已隐藏]", text)
+    text = re.sub(r"(?i)((?:" + keys + r")[\"']?\s*[=:]\s*)(?:\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;&\]\}\"']+)", r"\1[已隐藏]", text)
     text = re.sub(r"(https?://)[^/@\s]+:[^/@\s]+@", r"\1[已隐藏]@", text)
     return text[:40000]
 
