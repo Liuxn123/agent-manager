@@ -50,9 +50,16 @@ class MaintenanceTests(unittest.TestCase):
         other = self.root / "usb-B/AgentManager"
         shutil.copytree(self.usb, other)
         moved = Store(other / "data")
-        self.assertEqual(Path(moved.resources()[0].options["path"]), other / "projects/local")
-        self.assertEqual(Path(moved.setting("backup_root")), other / "backups")
-        self.assertEqual(Path(moved.evidence(str(other / "backups/example.amb"))["source"]), other / "projects/local")
+        self.assertEqual(Path(moved.resources()[0].options["path"]), (other / "projects/local").resolve())
+        self.assertEqual(Path(moved.setting("backup_root")), (other / "backups").resolve())
+        self.assertEqual(Path(moved.evidence(str(other / "backups/example.amb"))["source"]), (other / "projects/local").resolve())
+
+    def test_portable_paths_normalize_equivalent_directory_spellings(self):
+        from agent_manager.portable import encode_paths, decode_paths
+        value = str(self.usb / "nested/../projects/local")
+        encoded = encode_paths(value, self.usb.resolve())
+        self.assertEqual(encoded, "@portable/projects/local")
+        self.assertEqual(Path(decode_paths(encoded, self.usb.resolve())), (self.usb / "projects/local").resolve())
 
     def test_encrypted_portable_credentials_move_and_reject_wrong_master_password(self):
         vault = self.service.secrets

@@ -30,8 +30,8 @@ def encode_paths(value, root: Path | None):
         return [encode_paths(item, root) for item in value]
     if root and isinstance(value, str) and Path(value).is_absolute():
         try:
-            return PREFIX + Path(value).relative_to(root).as_posix()
-        except ValueError:
+            return PREFIX + Path(value).resolve().relative_to(root.resolve()).as_posix()
+        except (OSError, ValueError):
             pass
     return value
 
