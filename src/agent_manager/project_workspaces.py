@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from uuid import uuid4
+from urllib.parse import quote
 
 from .domain import UserError
 from .runtime import TaskContext
@@ -189,6 +190,57 @@ class ProjectWorkspace:
         item = self.project(identity)
         text = self.read(self.path(item["path"] + "/" + relative))
         return {"text": text, "path": str(self.path(item["path"] + "/" + relative))}
+
+    def notes(self, identity: str, context: TaskContext) -> dict:
+        item = self.project(identity)
+        folder = self.path(item["path"] + "/笔记")
+        rows = []
+        if folder.exists():
+            for path in sorted(folder.iterdir(), key=lambda p: p.name.casefold()):
+                context.checkpoint()
+                if path.suffix.lower() == ".md":
+                    self.path(path.relative_to(self.root).as_posix())
+                    if path.is_file():
+                        rows.append({"name": path.stem, "relative": "笔记/" + path.name})
+        return {"notes": rows}
+
+    def note_document(self, identity: str, relative: str) -> dict:
+        if not relative.startswith("笔记/") or len(Path(relative).parts) != 2 or not relative.lower().endswith(".md"):
+            raise UserError("请选择项目笔记目录中的 Markdown 文件。")
+        item = self.project(identity)
+        path = self.path(item["path"] + "/" + relative)
+        return {"text": self.read(path), "path": str(path)}
+
+    def create_note(self, identity: str, title: str, context: TaskContext) -> dict:
+        title = title.strip()
+        if not title or len(title) > 80 or title in {".", ".."} or re.search(r'[<>:"/\\|?*\x00-\x1f]', title) or title.endswith((".", " ")) or title.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *("COM" + str(i) for i in range(1,10)), *("LPT" + str(i) for i in range(1,10))}:
+            raise UserError("请填写有效笔记名称，不包含路径或文件名保留字符。")
+        with self.lock("NewNote"):
+            item = self.project(identity)
+            if item["path"].startswith("archive/"):
+                raise UserError("归档项目先重新启用，再新建笔记。")
+            folder = self.path(item["path"] + "/笔记")
+            path = self.path(item["path"] + "/笔记/" + title + ".md")
+            if folder.exists() and any(p.name.casefold() == path.name.casefold() for p in folder.iterdir()):
+                raise UserError("已有同名笔记，请在 Obsidian 中打开已有文件。")
+            handoff = self.path(item["path"] + "/agent/HANDOFF.md")
+            before = self.read(handoff)
+            context.checkpoint()
+            folder.mkdir(exist_ok=True)
+            text = f"---\ntitle: {json.dumps(title, ensure_ascii=False)}\ncreated: {today()}\nupdated: {today()}\nstatus: draft\ntype: project-note\nproject_id: {identity}\ntags: [project, note]\n---\n\n# {title}\n\n[项目入口](../README.md) · [当前状态](../agent/STATUS.md) · [任务](../agent/TASKS.md) · [日志与交接](../agent/HANDOFF.md)\n\n"
+            self.write(path, text)
+            try:
+                # No note content is duplicated into the handoff or manager database.
+                self.write(handoff, before.rstrip() + f"\n\n## {today()} — 创建项目笔记\n- 文件：[笔记](../笔记/{quote(path.name, safe='')})。正文在原文件维护。\n", before)
+            except (OSError, UserError) as exc:
+                raise UserError("笔记已建立，但交接追加未完成。请保留原文件并刷新，不重复创建：" + str(path)) from exc
+        return {"project_id": identity, "relative": "笔记/" + path.name, "path": str(path)}
+
+    def refresh_indexes(self, context: TaskContext) -> dict:
+        with self.lock("Index"):
+            self.update_indexes(self.registry())
+        context.log("已按登记表和 STATUS 刷新索引，保留人工说明。")
+        return {"updated": True}
 
     def project(self, identity: str) -> dict:
         item = next((p for p in self.registry()["projects"] if p["id"] == identity), None)

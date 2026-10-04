@@ -4,15 +4,16 @@ import hashlib
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl, QEvent, QFileSystemWatcher
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QPushButton,
     QComboBox, QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QSplitter, QTextBrowser, QDialog, QDialogButtonBox, QFormLayout, QTextEdit, QCheckBox,
-    QFileDialog, QMessageBox)
+    QFileDialog, QMessageBox, QListWidget, QListWidgetItem, QInputDialog, QToolButton, QMenu)
 
 from ..domain import Resource, UserError
 from ..project_workspaces import ProjectWorkspace, STATES
+from ..obsidian import project_uri, index_uri
 
 
 class ProjectDialog(QDialog):
@@ -36,6 +37,7 @@ class ProjectDialog(QDialog):
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("一键初始化")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.confirm)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -53,6 +55,10 @@ class ProjectPage(QWidget):
         self.window = window
         self.rows = []
         self.document_version = 0
+        self.note_version = 0
+        self.watch_paths = []
+        self.preferred_note = ""
+        self.closed = False
         layout = QVBoxLayout(self)
         title = QLabel("本地项目")
         title.setObjectName("Title")
@@ -70,6 +76,17 @@ class ProjectPage(QWidget):
         self.root_label.setWordWrap(True)
         self.root_label.setObjectName("Subtitle")
         root_row.addWidget(self.root_label, 1)
+        self.obsidian_menu = QToolButton()
+        self.obsidian_menu.setText("Obsidian 总览")
+        self.obsidian_menu.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.obsidian_menu.clicked.connect(lambda: self.open_overview())
+        menu = QMenu(self.obsidian_menu)
+        menu.addAction("打开项目总览", lambda: self.open_overview(False))
+        menu.addAction("打开归档索引", lambda: self.open_overview(True))
+        menu.addSeparator()
+        menu.addAction("刷新 Obsidian 索引", self.refresh_indexes)
+        self.obsidian_menu.setMenu(menu)
+        root_row.addWidget(self.obsidian_menu)
         choose = QPushButton("选择工作区…")
         choose.clicked.connect(self.choose_workspace)
         root_row.addWidget(choose)
@@ -93,15 +110,18 @@ class ProjectPage(QWidget):
         toolbar.addWidget(refresh)
         body.addLayout(toolbar)
         actions = QHBoxLayout()
-        self.open_button = QPushButton("打开项目")
+        self.open_button = QPushButton("打开文件夹")
         self.open_button.clicked.connect(self.open_project)
+        self.obsidian_button = QPushButton("Obsidian 中打开")
+        self.obsidian_button.setToolTip("打开当前状态、任务、日志，或所选笔记的原文件")
+        self.obsidian_button.clicked.connect(self.open_in_obsidian)
         self.log_button = QPushButton("写日志 / 交接")
         self.log_button.clicked.connect(self.append_log)
         self.edit_button = QPushButton("编辑当前文档")
         self.edit_button.clicked.connect(self.edit_document)
         self.move_button = QPushButton("归档项目…")
         self.move_button.clicked.connect(self.move_project)
-        for widget in (self.open_button, self.log_button, self.edit_button, self.move_button):
+        for widget in (self.open_button, self.obsidian_button, self.log_button, self.edit_button, self.move_button):
             actions.addWidget(widget)
         actions.addStretch()
         body.addLayout(actions)
@@ -127,6 +147,25 @@ class ProjectPage(QWidget):
             view.setOpenExternalLinks(True)
             self.documents.addTab(view, name)
             self.views.append(view)
+        notes_page = QWidget()
+        notes_layout = QVBoxLayout(notes_page)
+        notes_layout.setContentsMargins(8, 8, 8, 8)
+        note_toolbar = QHBoxLayout()
+        note_hint = QLabel("笔记保存在真实项目内，在 Obsidian 编辑同一份正文。")
+        note_hint.setWordWrap(True)
+        note_toolbar.addWidget(note_hint, 1)
+        self.new_note_button = QPushButton("新建笔记")
+        self.new_note_button.clicked.connect(self.create_note)
+        note_toolbar.addWidget(self.new_note_button)
+        notes_layout.addLayout(note_toolbar)
+        self.note_list = QListWidget()
+        self.note_list.setMaximumHeight(150)
+        self.note_list.currentItemChanged.connect(self.note_changed)
+        notes_layout.addWidget(self.note_list)
+        self.note_view = QTextBrowser()
+        self.note_view.setOpenExternalLinks(True)
+        notes_layout.addWidget(self.note_view, 1)
+        self.documents.addTab(notes_page, "项目笔记")
         self.documents.currentChanged.connect(self.selection_changed)
         split.addWidget(self.documents)
         split.setSizes([340, 620])
@@ -139,6 +178,14 @@ class ProjectPage(QWidget):
         self.tabs.addTab(backup_page, "资料备份与 Obsidian")
         layout.addWidget(self.tabs)
         self.project_rows = []
+        self.watcher = QFileSystemWatcher(self)
+        self.reload_timer = QTimer(self)
+        self.reload_timer.setSingleShot(True)
+        self.reload_timer.setInterval(500)
+        self.reload_timer.timeout.connect(self.reload_external_changes)
+        self.watcher.fileChanged.connect(lambda _: self.reload_timer.start())
+        self.watcher.directoryChanged.connect(lambda _: self.reload_timer.start())
+        self.window.installEventFilter(self)
         self.render()
         QTimer.singleShot(0, self.refresh)
 
@@ -191,15 +238,21 @@ class ProjectPage(QWidget):
             QMessageBox.warning(self, "无法使用工作区", str(exc))
 
     def refresh(self):
+        if self.closed:
+            return
         root = self.root()
         self.root_label.setText("工作区：" + str(root) if root else "未选择项目工作区")
         self.new_button.setEnabled(bool(root))
+        self.obsidian_menu.setEnabled(bool(root))
         if not root:
+            return
+        if self.owner() and self.window.is_busy(self.owner().id):
+            self.reload_timer.start()
             return
         def loaded(report):
             self.project_rows = report["projects"]
             self.render()
-            self.message.setText(f"{len(self.project_rows)} 个项目 · 状态来自项目 STATUS，日志保存在 HANDOFF。归档不等于备份。")
+            self.message.setText(f"{len(self.project_rows)} 个项目 · Obsidian 与管家使用同一份文件；外部修改自动刷新。归档不等于备份。")
         self.submit("读取项目登记与状态", lambda context: self.workspace().list_projects(context), loaded, persist_result=False)
 
     def selected(self):
@@ -228,28 +281,138 @@ class ProjectPage(QWidget):
         enabled = bool(item)
         archived = bool(item and item["path"].startswith("archive/"))
         self.open_button.setEnabled(enabled)
+        self.obsidian_button.setEnabled(enabled and self.documents.currentIndex() < 3)
+        self.new_note_button.setEnabled(enabled and not archived)
         self.log_button.setEnabled(enabled and not archived)
         self.edit_button.setEnabled(enabled and not archived and self.documents.currentIndex() < 2)
         self.move_button.setEnabled(enabled and not item.get("legacy", False) if item else False)
         self.move_button.setText("重新启用…" if archived else "归档项目…")
         self.document_version += 1
         version = self.document_version
+        self.note_version += 1
+        previous = self.note_list.currentItem()
+        selected_note = self.preferred_note or (previous.data(Qt.ItemDataRole.UserRole) if previous else "")
+        self.preferred_note = ""
+        self.note_list.blockSignals(True)
+        self.note_list.clear()
+        self.note_list.blockSignals(False)
+        self.note_view.setPlainText("选择项目查看笔记。" if not item else "读取中…")
         for view in self.views:
             view.setPlainText("选择项目查看管理资料。" if not item else "读取中…")
         if not item:
+            self.watch_paths = []
+            self.update_watches([])
             return
         root, identity = self.root(), item["id"]
         def read(context):
             workspace = ProjectWorkspace(root)
-            return {"documents": [workspace.document(identity, relative) for relative in self.document_paths]}
+            documents = [workspace.document(identity, relative) for relative in self.document_paths]
+            notes = workspace.notes(identity, context)["notes"]
+            paths = [str(workspace.registry_path), str(workspace.registry_path.parent), *[d["path"] for d in documents], str(workspace.path(item["path"] + "/agent")), str(workspace.path(item["path"])), str(workspace.path(item["path"] + "/笔记"))]
+            return {"documents": documents, "notes": notes, "watch_paths": paths}
         def show(report):
             if version != self.document_version:
                 return
             for view, document in zip(self.views, report["documents"]):
                 view.document().setBaseUrl(QUrl.fromLocalFile(str(Path(document["path"]).parent) + os.sep))
                 view.setMarkdown(document["text"])
+            self.note_list.blockSignals(True)
+            for note in report["notes"]:
+                cell = QListWidgetItem(note["name"])
+                cell.setData(Qt.ItemDataRole.UserRole, note["relative"])
+                self.note_list.addItem(cell)
+            if self.note_list.count():
+                row = next((i for i in range(self.note_list.count()) if self.note_list.item(i).data(Qt.ItemDataRole.UserRole) == selected_note), 0)
+                self.note_list.setCurrentRow(row)
+            self.note_list.blockSignals(False)
+            self.watch_paths = report["watch_paths"]
+            self.note_changed()
         # A dedicated read does not compete with the selected lifecycle task's resource identity.
         self.window.submit(None, "读取项目管理文档", read, show, persist_result=False)
+
+    def update_watches(self, paths):
+        existing = self.watcher.files() + self.watcher.directories()
+        if existing:
+            self.watcher.removePaths(existing)
+        available = list(dict.fromkeys(str(p) for p in paths if Path(p).exists()))
+        if available:
+            self.watcher.addPaths(available)
+
+    def eventFilter(self, watched, event):
+        if not self.closed and watched is self.window and event.type() == QEvent.Type.WindowActivate and self.isVisible():
+            self.reload_timer.start()
+        return super().eventFilter(watched, event)
+
+    def reload_external_changes(self):
+        if self.closed or not self.isVisible() or self.tabs.currentIndex() != 0 or not self.root():
+            return
+        if self.owner() and self.window.is_busy(self.owner().id):
+            self.reload_timer.start()
+            return
+        self.refresh()
+
+    def stop_updates(self):
+        self.closed = True
+        self.reload_timer.stop()
+        self.update_watches([])
+        self.window.removeEventFilter(self)
+
+    def note_changed(self, *_):
+        item, note = self.selected(), self.note_list.currentItem()
+        self.obsidian_button.setEnabled(bool(item) and (self.documents.currentIndex() < 3 or bool(note)))
+        self.note_version += 1
+        version = self.note_version
+        if not item or not note:
+            self.note_view.setPlainText("还没有项目笔记。点“新建笔记”，然后在 Obsidian 编辑正文。" if item else "选择项目查看笔记。")
+            self.update_watches(self.watch_paths if item else [])
+            return
+        workspace, identity, relative = self.workspace(), item["id"], note.data(Qt.ItemDataRole.UserRole)
+        def loaded(report):
+            if version != self.note_version:
+                return
+            self.note_view.document().setBaseUrl(QUrl.fromLocalFile(str(Path(report["path"]).parent) + os.sep))
+            self.note_view.setMarkdown(report["text"])
+            self.update_watches([*self.watch_paths, report["path"]])
+        self.window.submit(None, "读取所选项目笔记", lambda context: workspace.note_document(identity, relative), loaded, persist_result=False)
+
+    def create_note(self):
+        item = self.selected()
+        if not item or item["path"].startswith("archive/"):
+            return
+        title, accepted = QInputDialog.getText(self, "新建项目笔记", "笔记名称（保存到项目的“笔记”目录）：")
+        if not accepted:
+            return
+        workspace = self.workspace()
+        def created(report):
+            self.preferred_note = report["relative"]
+            self.selection_changed()
+        self.submit("创建项目笔记", lambda context: workspace.create_note(item["id"], title, context), created)
+
+    def launch_obsidian(self, report):
+        if not QDesktopServices.openUrl(QUrl(report["uri"])):
+            QMessageBox.warning(self, "未能打开 Obsidian", "请安装并运行 Obsidian 一次以注册 obsidian:// 接口。原文件仍在：\n" + report["path"])
+
+    def open_in_obsidian(self):
+        item = self.selected()
+        index = self.documents.currentIndex()
+        note = self.note_list.currentItem()
+        if not item or index == 3 and not note:
+            return
+        relative = self.document_paths[index] if index < 3 else note.data(Qt.ItemDataRole.UserRole)
+        workspace = self.workspace()
+        self.submit("定位 Obsidian 项目文档", lambda context: project_uri(workspace, item["id"], relative), self.launch_obsidian, persist_result=False)
+
+    def open_overview(self, archived=None):
+        # clicked(bool) must not override the currently selected filter.
+        archived = self.filter.currentData() == "archived" if archived is None else archived
+        workspace = self.workspace() if self.root() else None
+        if workspace:
+            self.submit("定位 Obsidian 项目索引", lambda context: index_uri(workspace, archived), self.launch_obsidian, persist_result=False)
+
+    def refresh_indexes(self):
+        workspace = self.workspace() if self.root() else None
+        if workspace:
+            self.submit("刷新 Obsidian 项目索引", workspace.refresh_indexes, lambda report: self.refresh())
 
     def create_project(self):
         dialog = ProjectDialog(self)
@@ -281,6 +444,8 @@ class ProjectPage(QWidget):
         text.setPlaceholderText("已做：\n验证：\n未完成 / 阻塞：\n下一步：")
         layout.addWidget(text)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -305,6 +470,8 @@ class ProjectPage(QWidget):
             editor.setPlainText(report["text"])
             layout.addWidget(editor)
             buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+            buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
             buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject)
             layout.addWidget(buttons)
             if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -335,6 +502,7 @@ class ProjectPage(QWidget):
             note.setWordWrap(True)
             layout.addWidget(note)
             buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
             buttons.button(QDialogButtonBox.StandardButton.Ok).setText("重新启用" if resume else "归档项目")
             buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
             def enabled():

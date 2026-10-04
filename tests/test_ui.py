@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PySide6.QtCore import QThread
 from PySide6.QtTest import QTest
@@ -88,6 +89,81 @@ class UITests(unittest.TestCase):
         task = self.store.tasks()[0]
         self.assertEqual(task["state"], "success")
         self.assertNotIn("fixture-private-conversation", task["result"] + task["log"])
+
+    def test_obsidian_external_note_and_atomic_status_edits_refresh_original_documents(self):
+        from agent_manager.project_workspaces import ProjectWorkspace
+        from agent_manager.runtime import TaskContext
+        from urllib.parse import parse_qs, urlparse
+        workspace = ProjectWorkspace(self.root / "workspace")
+        workspace.initialize(TaskContext())
+        project = workspace.create("界面联动", "验证同一份资料", True, TaskContext())
+        (workspace.root / "myself/.obsidian").mkdir()
+        note = workspace.create_note(project["project_id"], "实验笔记", TaskContext())
+        self.store.set_setting("project_workspace", str(workspace.root))
+        self.window.navigation.setCurrentRow(3)
+        page = self.window.project_page
+        page.refresh()
+
+        def until(predicate):
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                QTest.qWait(30)
+                time.sleep(0.005)  # Let Python workers run between Qt's synchronous test waits.
+                if predicate() and not self.window.jobs:
+                    return
+            self.fail("Obsidian UI refresh did not complete: " + str({"rows": page.rows, "notes": page.note_list.count(), "preview": page.note_view.toPlainText(), "tasks": [(t['title'], t['state'], t['result']) for t in self.store.tasks()[:8]]}))
+
+        until(lambda: page.note_list.count() == 1 and "实验笔记" in page.note_view.toPlainText())
+        page.documents.setCurrentIndex(3)
+        until(lambda: page.obsidian_button.isEnabled())
+        with patch("agent_manager.ui.projects.QDesktopServices.openUrl", return_value=True) as opened:
+            page.obsidian_button.click()
+            until(lambda: opened.call_count == 1)
+            params = parse_qs(urlparse(opened.call_args[0][0].toString()).query)
+            entry = workspace.root / workspace.project(project["project_id"])["vault_entry"]
+            self.assertEqual(params["path"], [str(entry / note["relative"])])
+        marker = "fixture-external-note-edit-private"
+        Path(note["path"]).write_text("# 外部编辑\n" + marker, encoding="utf-8")
+        until(lambda: marker in page.note_view.toPlainText())
+        status = Path(project["directory"]) / "agent/STATUS.md"
+        replacement = status.with_suffix(".tmp")
+        replacement.write_text(status.read_text(encoding="utf-8").replace("status: candidate", "status: paused"), encoding="utf-8")
+        replacement.replace(status)
+        until(lambda: page.rows and page.rows[0]["state"] == "paused")
+        self.assertIn(str(status), page.watcher.files())
+        self.assertFalse(any(marker in t["result"] + t["log"] for t in self.store.tasks()))
+        self.window.resize(960, 660)
+        self.app.processEvents()
+        for control in (page.open_button, page.obsidian_button, page.move_button, page.new_note_button):
+            self.assertTrue(control.isVisible())
+            self.assertGreater(control.width(), 65)
+
+    def test_obsidian_archived_notes_are_visible_without_create_or_inline_edit(self):
+        from agent_manager.project_workspaces import ProjectWorkspace
+        from agent_manager.runtime import TaskContext
+        workspace = ProjectWorkspace(self.root / "workspace")
+        workspace.initialize(TaskContext())
+        project = workspace.create("历史笔记", "保持历史", False, TaskContext())
+        workspace.create_note(project["project_id"], "保留笔记", TaskContext())
+        workspace.move(workspace.plan_move(project["project_id"], False, TaskContext()), "归档", TaskContext())
+        self.store.set_setting("project_workspace", str(workspace.root))
+        self.window.navigation.setCurrentRow(3)
+        page = self.window.project_page
+        page.filter.setCurrentIndex(1)
+        page.refresh()
+        deadline = time.monotonic() + 10
+        while (self.window.jobs or page.note_list.count() != 1) and time.monotonic() < deadline:
+            QTest.qWait(30)
+            time.sleep(0.005)
+        page.documents.setCurrentIndex(3)
+        deadline = time.monotonic() + 10
+        while (self.window.jobs or page.note_list.count() != 1) and time.monotonic() < deadline:
+            QTest.qWait(30)
+            time.sleep(0.005)
+        self.assertEqual(page.note_list.count(), 1)
+        self.assertFalse(page.new_note_button.isEnabled())
+        self.assertFalse(page.edit_button.isEnabled())
+        self.assertFalse(page.log_button.isEnabled())
 
 
 if __name__ == "__main__":

@@ -1119,4 +1119,7 @@ class MainWindow(QMainWindow):
             if QMessageBox.question(self, "Agent 仍在运行", "退出后启动的 Agent 将继续运行。重新打开程序不能接管这些进程。确认退出？") != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
+        self.timer.stop()
+        self.schedule_timer.stop()
+        self.project_page.stop_updates()
         event.accept()

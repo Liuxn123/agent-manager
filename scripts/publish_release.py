@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': '本地项目主入口改为规范项目管理：选择已有 projects.json v2 工作区或初始化空工作区，按 P-YYYY-NNN 编号创建项目，查看和编辑 STATUS/TASKS，向 HANDOFF 追加日志。\n\n新增归档与重新启用：预检来源、目标、文件清单和 Obsidian 入口，移动后验证文件，保留编号并更新登记表、状态、交接与生成索引。原备份功能保留在“资料备份与 Obsidian”页签。使用说明已更新。\n\n归档是目录移动，不代表备份或验收成功。旧 L-归档保持只读；项目内联接/符号链接、目标冲突、跨文件系统和变化中的文件会阻断移动。中途失败保留现场与移动记录，禁止盲目重试。业务文件里的绝对路径、Git 与同步设置需要自行核对。\n\n四个平台通过测试、运行包解压启动和便携目录移动检查。复制完整便携目录并保留 data、backups。实际项目工作区和 SSH 文件位于外部时需要单独携带；同一同步工作区不要在多台电脑同时分配编号。'})
+            'body': "Obsidian 联动：本地项目可直接在 Obsidian 打开当前状态、任务、日志与所选笔记的同一份原文件。使用官方 URI 接口，中文、空格和保留字符正确编码，无需插件；错误入口停止打开，遵守无入口例外。\n\n新增“项目笔记”页签，按需创建带项目编号、草稿属性与管理链接的 Markdown，保存在真实项目“笔记”目录；归档与重新启用随完整项目保留。所选管理文件和笔记的外部编辑、原子替换自动重读，正文不持久化到管家活动记录。Obsidian 总览可打开两份索引，或显式刷新生成区块，保留人工说明。窗口退出停止监听及定时器，合并重复后台读取。\n\n四个平台通过测试、解压启动与便携目录移动检查。初次使用请在 Obsidian 打开工作区的 myself 知识库；换电脑需重新打开并核对项目入口。程序不安装插件或修改 Obsidian 配置。目录联接/符号链接的同步有边界，Vault/Sync 不代表外部项目已备份，需携带完整 projects、archive 和根目录 agent。归档前停止其他程序写入。旧 L-归档保持只读。"})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}
