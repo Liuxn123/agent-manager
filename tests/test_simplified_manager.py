@@ -138,6 +138,18 @@ class SimplifiedManagerTests(unittest.TestCase):
         self.assertEqual(parse_usage(data)[-1], 24)
         self.assertIsNone(parse_usage(b'{"type":"chat","text":"private fixture"}'))
 
+    def test_usage_counts_remain_visible_in_redacted_reports(self):
+        from agent_manager.ui.presentation import readable_report
+        home = self.root / "codex"
+        (home / "sessions").mkdir(parents=True)
+        event = {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}}}}
+        (home / "sessions/rollout-fixture.jsonl").write_text(json.dumps(event) + "\n")
+        resource = Resource("Codex", "agent", {"engine": "Codex", "record_paths": [str(home)], "portable_bundle": True})
+        text = readable_report(read_usage(resource, self.context))
+        self.assertIn("输入数量：12", text)
+        self.assertIn("总计数量：15", text)
+        self.assertNotIn("[已隐藏]", text)
+
     def test_project_logs_show_latest_entry_and_keep_original_available(self):
         browser = QTextBrowser()
         widget = ProjectLogView(browser)

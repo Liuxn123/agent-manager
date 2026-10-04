@@ -130,6 +130,6 @@ def read_usage(resource: Resource, context: TaskContext) -> dict:
         except OSError:
             errors += 1
     return {"范围": "本地可读取会话的有限统计，非账单；含累积计数，不能据此拆分每日消费", "状态": "读到用量" if available else "没有读到用量字段",
-            "会话数": available, "输入 Token": total[0], "其中缓存输入": total[1], "输出 Token": total[2],
-            "其中推理输出": total[3], "总 Token": total[4], "读取 MiB": round(read_bytes / 1024**2, 2), "存在截断 / 数量上限": limited,
+            "计数单位": "Token（数量，不是费用）", "会话数": available, "输入数量": total[0], "其中缓存输入": total[1], "输出数量": total[2],
+            "其中推理输出": total[3], "总计数量": total[4], "读取 MiB": round(read_bytes / 1024**2, 2), "存在截断 / 数量上限": limited,
             "无法读取的文件数": errors, "说明": "缓存和推理是子集，不重复加进总量。最多 200 个文件、每文件末尾 2 MiB、总计 64 MiB。只在点击时读取。"}
