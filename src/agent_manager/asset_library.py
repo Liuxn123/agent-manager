@@ -173,7 +173,14 @@ def scan(store, context: TaskContext) -> dict:
 def preview(store, item: dict, context: TaskContext) -> dict:
     context.checkpoint()
     if item["category"] == "mcp":
-        return {"text": json.dumps(item["public"], ensure_ascii=False, indent=2) + "\n\n这里只列连接说明，不显示启动参数、环境变量值或登录材料。请在原 Agent 中修改和启用连接。"}
+        public = item["public"]
+        lines = ["名称：" + public["名称"], "连接方式：" + public["方式"], "配置中已启用：" + ("是" if public["启用"] else "否")]
+        if public["地址"]:
+            lines.append("服务主机：" + public["地址"])
+        if public["程序"]:
+            lines.append("启动程序：" + public["程序"])
+        lines.append("需要的环境变量：" + ("、".join(public["环境变量名"]) or "未填写"))
+        return {"text": "\n".join(lines) + "\n\n这是配置清单，未检查工具是否已连接。这里只列连接说明，不显示启动参数、环境变量值或登录材料。请在原 Agent 中修改和启用连接。"}
     path = checked(Path(item["path"]))
     roots = []
     for root in roots_for(store):
