@@ -253,7 +253,7 @@ def project_context(status, state="candidate"):
     old = re.search(r"(?m)^\s*[-*] 当前阶段[：:]\s*(.+)$", status)
     if not isinstance(phase, str) or not phase.strip():
         old_phase = old[1].strip().rstrip("。") if old else ""
-        phase = old_phase if old_phase and len(old_phase) <= 60 and "待明确" not in old_phase else {"candidate": "规划", "active": "进行中", "completed": "完成", "archived": "完成"}.get(state, "进行中")
+        phase = old_phase if old_phase and len(old_phase) <= 20 and "待明确" not in old_phase else {"candidate": "规划", "active": "进行中", "completed": "完成", "archived": "完成"}.get(state, "进行中")
     next_step = re.search(r"(?m)^\s*[-*] 下一步[：:]\s*(.+)$", status)
     relations = {}
     for key in ("agents", "resources"):
@@ -284,9 +284,13 @@ def set_project_details(workspace, identity, phase, agents, resources, expected,
         if not isinstance(values, list) or len(values) > 100 or any(not isinstance(v, str) or len(v) > 240 for v in values):
             raise UserError("关联资料编号不正确。")
     text = patch_fields(expected, {"phase": phase.strip(), "agents": agents, "resources": resources})
-    # Older projects put detailed progress in this line. Preserve those paragraphs.
+    # Only mirror known stage labels; legacy free-form progress remains untouched.
+    old_metadata, _ = frontmatter(expected)
+    mirrored_phases = {*PHASES, "待明确"}
+    if isinstance(old_metadata.get("phase"), str):
+        mirrored_phases.add(old_metadata["phase"])
     text = re.sub(r"(?m)^([-*] 当前阶段[：:])([^\n]*)$",
-                  lambda m: m[1] + " " + phase.strip() if len(m[2].strip()) <= 60 else m[0], text)
+                  lambda m: m[1] + " " + phase.strip() if m[2].strip().rstrip("。") in mirrored_phases else m[0], text)
     return workspace.save_document(identity, "agent/STATUS.md", text, expected, context)
 
 

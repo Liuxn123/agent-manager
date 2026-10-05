@@ -159,3 +159,11 @@ class WorkbenchTests(unittest.TestCase):
         updated = workspace.document(project["project_id"], "agent/STATUS.md")["text"]
         self.assertIn(paragraph, updated)
         self.assertEqual(project_context(updated)["phase"], "测试")
+        short_progress = "已完成页面整理，目前需要检查迁移兼容性并验证旧项目的阶段记录。"
+        self.assertLess(len(short_progress), 60)
+        shorter = updated.replace(paragraph, short_progress)
+        workspace.save_document(project["project_id"], "agent/STATUS.md", shorter, updated, context)
+        set_project_details(workspace, project["project_id"], "收尾", [], [], shorter, context)
+        final = workspace.document(project["project_id"], "agent/STATUS.md")["text"]
+        self.assertIn(short_progress, final)
+        self.assertEqual(project_context(final)["phase"], "收尾")
