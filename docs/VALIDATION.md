@@ -14,4 +14,6 @@
 
 跨平台源码与既有四平台 CI 配置保留；Linux / macOS / 其他 Windows 设备未在本机实测。资源安装 / 已测试标记是人工登记，不代表本版连接了 MCP。阶段总结只提供 Prompt 与人工审阅接口。
 
-最终自动化结果：104 项测试，102 项通过、2 项符号链接权限限制跳过。命令为 `python -m unittest discover -s tests -q`。打包与移目录检查使用 `scripts/build.py`、`scripts/smoke_package.py`。
+最终自动化结果：105 项测试，103 项通过、2 项符号链接权限限制跳过。命令为 `python -m unittest discover -s tests -q`。打包与移目录检查使用 `scripts/build.py`、`scripts/smoke_package.py`。
+
+跨平台回归发现并修复 macOS 原子保存通知与 offscreen 定时器频率差异。可见今日页面以轻量文件读取补足通知，不周期性扫描项目；文件监听按差异维护。四平台最终 CI 以私有仓库的对应提交运行结果为准。

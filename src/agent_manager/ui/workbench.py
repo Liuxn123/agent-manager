@@ -93,8 +93,6 @@ class MarkdownPage(QWidget):
 
     def watch(self, paths):
         previous = self.watcher.files() + self.watcher.directories()
-        if previous:
-            self.watcher.removePaths(previous)
         available = []
         for value in paths:
             path = Path(value)
@@ -102,8 +100,12 @@ class MarkdownPage(QWidget):
                 path = path.parent
             if path.exists() and str(path) not in available:
                 available.append(str(path))
-        if available:
-            self.watcher.addPaths(available)
+        removed = [value for value in previous if value not in available]
+        added = [value for value in available if value not in previous]
+        if removed:
+            self.watcher.removePaths(removed)
+        if added:
+            self.watcher.addPaths(added)
 
     def eventFilter(self, watched, event):
         if watched is self.window and event.type() == QEvent.Type.WindowActivate and self.isVisible() and not self.closed:
@@ -204,7 +206,7 @@ class TodayPage(MarkdownPage):
         bottom.addWidget(control("旧版工作笔记", self.legacy_notes))
         layout.addLayout(bottom)
         self.clock_timer = QTimer(self)
-        self.clock_timer.setInterval(60_000)
+        self.clock_timer.setInterval(2_000)
         self.clock_timer.timeout.connect(self.check_day)
         self.clock_timer.start()
 
@@ -215,6 +217,14 @@ class TodayPage(MarkdownPage):
         if self.day != date.today():
             self.day = date.today()
             self.refresh()
+        elif self.isVisible() and self.report and not self.worker:
+            # macOS may coalesce or miss notifications after an atomic editor save.
+            # Check only today's small file, never rescan all projects on this timer.
+            daily = Daily(self.notes_root, self.day)
+            def changed(report):
+                if report["original"] != self.report["original"]:
+                    self.render_daily(report)
+            self.read_background(lambda context: daily.load(), changed)
 
     def refresh(self):
         if self.closed:
@@ -222,6 +232,7 @@ class TodayPage(MarkdownPage):
         self.day = date.today()
         self.heading.setText(self.day.strftime("%Y 年 %m 月 %d 日") + " · " + "星期" + "一二三四五六日"[self.day.weekday()])
         notes_root = work_root(self.window.store)
+        self.notes_root = notes_root
         daily, root = Daily(notes_root, self.day), self.window.store.setting("project_workspace", "")
         def read(context):
             report = daily.load()
@@ -244,7 +255,12 @@ class TodayPage(MarkdownPage):
         self.read_background(read, self.render)
 
     def render(self, report):
-        self.report, self.projects = report["daily"], report["projects"]
+        self.projects = report["projects"]
+        self.render_daily(report["daily"])
+        self.render_projects(report)
+
+    def render_daily(self, report):
+        self.report = report
         self.schedule.clear()
         self.schedule.addItems([item["text"] for item in self.report["schedule"]] or ["暂无日程。可以直接在今日 Markdown 添加时间和安排。"])
         self.tasks.blockSignals(True)
@@ -257,6 +273,8 @@ class TodayPage(MarkdownPage):
             self.tasks.addItem(item)
         self.tasks.blockSignals(False)
         self.daily_hint.setText("还没有今日计划，点“编辑今日计划”开始。" if self.report["original"] is None else "保存到今日 Markdown；Obsidian 修改后会自动刷新。")
+
+    def render_projects(self, report):
         self.continue_projects.clear()
         for row in self.projects:
             if row["state"] in {"completed", "paused"}:

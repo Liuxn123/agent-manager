@@ -79,7 +79,7 @@ class PerformanceUITests(unittest.TestCase):
         def scan(resources, cancel):
             threads.append(threading.get_ident())
             entered.set()
-            gate.wait(2)
+            gate.wait(10)
             return {resource.id: [123]}
         timer = QTimer(); timer.setInterval(5); timer.timeout.connect(lambda: ticks.append(1))
         timer.start()
@@ -90,8 +90,10 @@ class PerformanceUITests(unittest.TestCase):
                 self.window.refresh_agent_activity()
                 self.assertIs(self.window.agent_status_worker, worker)
                 self.until(entered.is_set)
-                QTest.qWait(60)
-                self.assertGreater(len(ticks), 3)
+                ticks.clear()
+                # macOS offscreen timers may coalesce; prove responsiveness while the
+                # worker remains blocked, without assuming a 5 ms wall-clock cadence.
+                self.until(lambda: len(ticks) > 3)
                 self.assertNotEqual(threads, [threading.get_ident()])
             finally:
                 gate.set()

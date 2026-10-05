@@ -186,3 +186,14 @@ class WorkbenchUITests(unittest.TestCase):
             self.window.agent_page.directory()
             opened.assert_not_called()
         self.assertEqual(len(self.store.resources()), 2)
+
+    def test_daily_refreshes_even_when_atomic_save_notification_is_missed(self):
+        page = self.window.today_page
+        self.until(lambda: not page.worker)
+        page.watcher.blockSignals(True)
+        path = Path(self.daily.load()["path"])
+        old_count = len(self.store.tasks())
+        path.write_text(self.daily.load()["text"].replace("验证恢复", "兜底刷新任务"), encoding="utf-8")
+        self.until(lambda: "兜底刷新任务" in page.tasks.item(0).text())
+        self.assertEqual(len(self.store.tasks()), old_count)
+        page.watcher.blockSignals(False)
