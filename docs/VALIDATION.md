@@ -12,8 +12,8 @@
 - 本地更新：只复制程序与文档，更新前后 data / backups / restored / portable.json 的 9 个已存在文件哈希一致；SQLite 完整性检查通过，11 项登记保留。正常运行后配置迁移标记和最近使用时间会更新 SQLite。
 - 真实配置：打开现有便携目录，默认今日；从今日进入既有 Obsidian 工作区项目，原 STATUS 可读。个人正文未作为试验输入修改。
 
-跨平台源码与既有四平台 CI 配置保留；Linux / macOS / 其他 Windows 设备未在本机实测。资源安装 / 已测试标记是人工登记，不代表本版连接了 MCP。阶段总结只提供 Prompt 与人工审阅接口。
+跨平台：最终源码提交 `8ca4e2afbd4282c300f5b65df7d34ae3614041eb` 的 Windows、Ubuntu 22.04、macOS ARM、macOS Intel 四项 CI 均成功，包含自动化测试、冻结包构建、解压启动和整目录移动验证。[对应流水线](https://github.com/Liuxn123/agent-manager/actions/runs/37288202422)。Linux / macOS / 其他 Windows 设备的真实日常使用未在本机实测。资源安装 / 已测试标记是人工登记，不代表本版连接了 MCP。阶段总结只提供 Prompt 与人工审阅接口。
 
 最终自动化结果：105 项测试，103 项通过、2 项符号链接权限限制跳过。命令为 `python -m unittest discover -s tests -q`。打包与移目录检查使用 `scripts/build.py`、`scripts/smoke_package.py`。
 
-跨平台回归发现并修复 macOS 原子保存通知与 offscreen 定时器频率差异。可见今日页面以轻量文件读取补足通知，不周期性扫描项目；文件监听按差异维护。四平台最终 CI 以私有仓库的对应提交运行结果为准。
+跨平台回归发现并修复 macOS 原子保存通知与 offscreen 定时器频率差异。可见今日页面以轻量文件读取补足通知，不周期性扫描项目；文件监听按差异维护。最终四平台 CI 已通过。最后的文档记录提交不改变已验证源码，发布产物绑定上述已验证提交。
