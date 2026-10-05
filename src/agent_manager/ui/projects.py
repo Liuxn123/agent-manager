@@ -108,6 +108,7 @@ class ProjectPage(QWidget):
         self.preferred_note = ""
         self.preferred_project = ""
         self.status_text, self.task_text, self.project_catalog = "", "", []
+        self.document_errors = {}
         self.project_details = {}
         self.closed = False
         self.setObjectName("ProjectPage")
@@ -341,11 +342,15 @@ class ProjectPage(QWidget):
         self.watcher.directoryChanged.connect(lambda _: self.reload_timer.start())
         self.window.installEventFilter(self)
         self.render()
+        self.new_button.setEnabled(bool(self.root()))
+        if not self.root():
+            self.refresh()
         # Load project files when this page is opened, rather than at startup.
 
     def _resource_button(self):
         control = QPushButton("查看项目资源")
         control.clicked.connect(self.show_project_resources)
+        self.resource_button = control
         return control
 
     def render_related(self, item):
@@ -387,9 +392,7 @@ class ProjectPage(QWidget):
         item = self.selected()
         if item:
             page = self.window.catalog_page
-            page.project_filter, page.agent_filter = item["id"], ""
-            page.related_ids = self.project_details.get("resources", [])
-            page.search.clear()
+            page.set_scope(project=item["id"], related=self.project_details.get("resources", []))
             self.window.navigation.setCurrentRow(self.window.LIBRARY)
 
     def edit_stage(self):
@@ -547,6 +550,11 @@ class ProjectPage(QWidget):
         self.new_button.setEnabled(bool(root))
         self.obsidian_menu.setEnabled(bool(root))
         if not root:
+            self.project_rows = []
+            self.render()
+            self.project_name.setText("先选择项目工作区")
+            self.stage_label.setText("点击上方“工作区 · 选择…”加载已有项目，或初始化一个空文件夹。")
+            self.message.setText("当前数据位置：" + str(self.window.store.root) + " · 尚未选择工作区，原有项目文件不会被删除。")
             return
         if self.owner() and self.window.is_busy(self.owner().id):
             self.reload_timer.start()
@@ -587,14 +595,15 @@ class ProjectPage(QWidget):
         enabled = bool(item)
         archived = bool(item and item["path"].startswith("archive/"))
         self.open_button.setEnabled(enabled)
+        self.resource_button.setEnabled(enabled)
         self.obsidian_button.setEnabled(enabled and (self.documents.currentIndex() != 3 or self.note_list.currentItem() is not None))
         self.new_note_button.setEnabled(enabled and not archived)
-        self.log_button.setEnabled(enabled and not archived)
-        self.edit_button.setEnabled(enabled and not archived and self.documents.currentIndex() < 2)
+        self.log_button.setEnabled(enabled and not archived and not self.document_errors.get(2))
+        self.edit_button.setEnabled(enabled and not archived and self.documents.currentIndex() < 2 and not self.document_errors.get(self.documents.currentIndex()))
         self.move_button.setEnabled(enabled and not item.get("legacy", False) if item else False)
         self.move_button.setText("重新启用…" if archived else "归档项目…")
-        self.stage_button.setEnabled(enabled and not archived and bool(self.status_text))
-        self.summary_button.setEnabled(enabled and not archived and bool(self.status_text))
+        self.stage_button.setEnabled(enabled and not archived and bool(self.status_text) and not self.document_errors.get(0))
+        self.summary_button.setEnabled(enabled and not archived and bool(self.status_text) and not self.document_errors.get(2))
         for control, action in self.more_actions.items():
             action.setEnabled(control.isEnabled())
             action.setText(control.text())
@@ -602,6 +611,8 @@ class ProjectPage(QWidget):
 
     def selection_changed(self):
         self.status_text, self.task_text = "", ""
+        self.document_errors = {}
+        self.project_details = {}
         self.update_selection_actions()
         item = self.selected()
         self.document_version += 1
@@ -634,19 +645,43 @@ class ProjectPage(QWidget):
             self.update_watches([])
             return
         root, identity = self.root(), item["id"]
+        notes_root = work_root(self.window.store)
         def read(context):
             workspace = ProjectWorkspace(root)
-            documents = [workspace.document(identity, relative) for relative in self.document_paths]
-            notes = workspace.notes(identity, context)["notes"]
-            library = Catalog(work_root(self.window.store)).scan(context)
+            documents, errors = [], []
+            for relative in self.document_paths:
+                context.checkpoint()
+                try:
+                    documents.append(workspace.document(identity, relative))
+                except (UserError, OSError) as exc:
+                    documents.append({"text": "", "path": str(root / item["path"] / relative), "error": str(exc)})
+                    errors.append(relative + "：" + str(exc))
+            try:
+                notes = workspace.notes(identity, context)["notes"]
+            except (UserError, OSError) as exc:
+                notes = []
+                errors.append("笔记：" + str(exc))
+            try:
+                library = Catalog(notes_root).scan(context)
+                errors.extend(library["errors"])
+            except (UserError, OSError) as exc:
+                library = {"items": []}
+                errors.append("资源库：" + str(exc))
             paths = [str(workspace.registry_path), str(workspace.registry_path.parent), *[d["path"] for d in documents], str(workspace.path(item["path"] + "/agent")), str(workspace.path(item["path"])), str(workspace.path(item["path"] + "/笔记"))]
-            paths += [str(work_root(self.window.store) / "资源"), *[i["path"] for i in library["items"]]]
-            return {"documents": documents, "notes": notes, "watch_paths": paths, "catalog": library["items"]}
+            paths += [str(notes_root / "资源"), *[i["path"] for i in library["items"]]]
+            return {"documents": documents, "notes": notes, "watch_paths": paths, "catalog": library["items"], "errors": errors}
         def show(report):
-            if version != self.document_version:
+            if self.closed or version != self.document_version:
                 return
+            self.document_errors = {i: d["error"] for i, d in enumerate(report["documents"]) if d.get("error")}
             self.status_text, self.task_text = report["documents"][0]["text"], report["documents"][1]["text"]
-            self.project_details = project_context(self.status_text, item["state"])
+            try:
+                self.project_details = project_context(self.status_text, item["state"])
+            except UserError as exc:
+                self.document_errors[0] = str(exc)
+                report["errors"].append("STATUS：" + str(exc))
+                self.status_text = ""
+                self.project_details = project_context("", item["state"])
             self.project_catalog = report["catalog"]
             self.stage_label.setText(item["name"] + " · " + self.project_details["phase"] + "\n下一步：" + self.project_details["next_step"])
             blocks = summaries(report["documents"][2]["text"])
@@ -657,6 +692,8 @@ class ProjectPage(QWidget):
             self.project_identity.setText(item["id"] + " · " + STATES.get(item["state"], "请检查状态") + " · " + phase)
             self.stage_label.setText("当前阶段：" + phase + "\n下一步：" + self.project_details["next_step"])
             self.project_meta.setText("最近更新：" + snapshot["updated"] + " · Obsidian 与管家共用原文件")
+            if report["errors"]:
+                self.project_meta.setText("部分资料需要检查：" + "；".join(report["errors"]))
             base_url = QUrl.fromLocalFile(str(Path(report["documents"][0]["path"]).parent) + os.sep)
             self.overview.show_snapshot(snapshot, base_url)
             linked = [self.related_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.related_list.count())]
@@ -673,9 +710,11 @@ class ProjectPage(QWidget):
                 metric.note.setText(note)
             self.hero.fit()
             self.update_selection_actions()
-            for view, document in zip(self.views, report["documents"]):
+            for index, (view, document) in enumerate(zip(self.views, report["documents"])):
                 view.document().setBaseUrl(QUrl.fromLocalFile(str(Path(document["path"]).parent) + os.sep))
-                if view is self.views[2]:
+                if index in self.document_errors:
+                    view.setPlainText("这份文档暂时无法读取：" + self.document_errors[index] + "\n请打开项目文件夹检查；其他资料仍可查看。原文件未改动。")
+                elif view is self.views[2]:
                     self.log_view.set_text(document["text"])
                 else:
                     view.setMarkdown(document["text"])
@@ -778,13 +817,18 @@ class ProjectPage(QWidget):
             self.submit("刷新 Obsidian 项目索引", workspace.refresh_indexes, lambda report: self.refresh())
 
     def create_project(self):
+        if not self.root():
+            self.choose_workspace()
+            return
         dialog = ProjectDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         name, goal, entry = dialog.name.text().strip(), dialog.goal.toPlainText().strip(), dialog.entry.isChecked()
         workspace = self.workspace()
         def completed(report):
+            self.search.clear()
             self.filter.setCurrentIndex(0)
+            self.preferred_project = report["project_id"]
             self.refresh()
             QMessageBox.information(self, "项目已初始化", report["project_id"] + "\n" + report["directory"] + "\n\n已建立状态、任务和交接文件；项目默认为待开展。")
         self.submit("初始化新项目", lambda context: workspace.create(name, goal, entry, context), completed)
@@ -792,7 +836,7 @@ class ProjectPage(QWidget):
     def open_project(self):
         item = self.selected()
         if item:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(item["directory"]))
+            self.window.open_path(Path(item["directory"]))
 
     def append_log(self):
         item = self.selected()

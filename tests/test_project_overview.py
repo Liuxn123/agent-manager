@@ -29,6 +29,8 @@ class ProjectOverviewTests(unittest.TestCase):
         self.assertIn("任务入口", result["next"])
         self.assertIn("真实验证", result["recent"])
         self.assertNotIn("percent", result)
+        legacy = overview_snapshot(status.replace("阻塞：", "阻塞/待决定："), "", "", [])
+        self.assertIn("等待验证", legacy["risks"])
 
     def test_recent_preview_uses_log_body_instead_of_form_heading(self):
         result = overview_snapshot("# 状态", "# 任务", "## 2026-10-05T18:58:18+08:00 — 用户日志\n\n### 完成了什么\n\n实际日志内容\n\n### 如何确认\n\n实际依据", [])

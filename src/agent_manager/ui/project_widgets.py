@@ -71,7 +71,7 @@ def overview_snapshot(status, tasks, handoff, summaries):
         return "\n\n".join(body for name, body in blocks if any(word in name for word in words)) or default
     risks = []
     for line in outside_fences(status):
-        if re.match(r"^\s*[-*+]\s+(?:\*\*)?(?:阻塞|风险|待确认|待决策)[：:]", line):
+        if re.match(r"^\s*[-*+]\s+(?:\*\*)?(?:阻塞(?:/待决定)?|风险|待确认|待决策)[：:]", line):
             risks.append(line.strip())
     entries = [(title, body) for title, body in sections(handoff) if re.search(r"\d{4}-\d{2}-\d{2}", title)]
     checklist = task_snapshot(tasks)

@@ -290,7 +290,7 @@ def project_context(status, state="candidate"):
     phase = metadata.get("phase")
     old = re.search(r"(?m)^\s*[-*] 当前阶段[：:]\s*(.+)$", status)
     if not isinstance(phase, str) or not phase.strip():
-        old_phase = old[1].strip().rstrip("。") if old else ""
+        old_phase = re.split(r"[。；;\n]", old[1].strip(), maxsplit=1)[0] if old else ""
         phase = old_phase if old_phase and len(old_phase) <= 20 and "待明确" not in old_phase else {"candidate": "规划", "active": "进行中", "completed": "完成", "archived": "完成"}.get(state, "进行中")
     next_step = re.search(r"(?m)^\s*[-*] 下一步[：:]\s*(.+)$", status)
     relations = {}

@@ -1687,12 +1687,15 @@ class MainWindow(QMainWindow):
                 return {"removed": True}
             self.submit(resource, resource.name + " · 移除系统口令", remove)
 
-    def open_path(self, path: Path) -> None:
+    def open_path(self, path: Path) -> bool:
         path = path.expanduser()
         if not path.is_dir():
             QMessageBox.warning(self, "目录不存在", "请检查目录配置。备份目录会在首次备份时创建。")
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+            return False
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+        if not opened:
+            QMessageBox.warning(self, "未能打开目录", "系统没有打开这个目录。请检查文件管理器设置或目录权限。")
+        return opened
 
     def closeEvent(self, event) -> None:
         if self.jobs:

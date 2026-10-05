@@ -1,4 +1,4 @@
-# Agent 管家 · v0.7.2
+# Agent 管家 · v0.7.3
 
 **每天开始 Agent 工作的个人工作台，用来管理今日工作、项目、Agent、Prompt/Skills/MCP 等资源，并保护重要 Agent 数据。**
 
@@ -30,6 +30,8 @@ python -m venv .venv
 ```
 
 macOS / Linux：激活虚拟环境后 `python -m pip install -e . && python -m agent_manager`。Python 需要 3.11+。各平台分别打包，不能拿 Windows exe 在其他系统运行。
+
+Windows 源码启动可双击 `start.cmd`；当项目旁已有 AgentManager-Portable 安装时沿用其 data，避免打开另一套空登记。需要隔离开发时显式设置 AGENT_MANAGER_DATA_DIR。
 
 第一次打开：
 

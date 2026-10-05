@@ -214,6 +214,113 @@ class WorkbenchUITests(unittest.TestCase):
             opened.assert_not_called()
         self.assertEqual(len(self.store.resources()), 2)
 
+    def test_missing_task_file_keeps_status_logs_and_notes_usable(self):
+        tasks = Path(self.project["directory"]) / "agent/TASKS.md"
+        tasks.unlink()
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        page = self.window.project_page
+        self.until(lambda: 1 in page.document_errors)
+        self.assertIn("走通工作入口", page.overview.previews["goals"].toPlainText())
+        self.assertIn("无法读取", page.views[1].toPlainText())
+        self.assertTrue(page.log_button.isEnabled())
+        page.documents.setCurrentIndex(1)
+        self.assertFalse(page.edit_button.isEnabled())
+        self.assertFalse(tasks.exists())
+        self.assertNotIn("读取中", page.stage_label.text())
+
+    def test_empty_workspace_has_explicit_guidance_and_no_active_project_actions(self):
+        self.store.set_setting("project_workspace", "")
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        self.until(lambda: not self.window.jobs)
+        page = self.window.project_page
+        self.assertEqual(page.table.rowCount(), 0)
+        self.assertIn("先选择", page.project_name.text())
+        for control in (page.new_button, page.resource_button, page.summary_button, page.log_button, page.more_button):
+            self.assertFalse(control.isEnabled())
+        self.assertIn(str(self.store.root), page.message.text())
+
+    def test_new_project_is_selected_even_after_search_and_keeps_previous_project(self):
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        page = self.window.project_page
+        self.until(lambda: bool(page.status_text))
+        page.search.setText("不存在的项目")
+        def fill(dialog):
+            dialog.name.setText("新初始化项目")
+            dialog.goal.setPlainText("验证项目能立即找到")
+            dialog.entry.setChecked(False)
+            return QDialog.DialogCode.Accepted
+        with patch("agent_manager.ui.projects.ProjectDialog.exec", fill), patch("agent_manager.ui.projects.QMessageBox.information"):
+            page.new_button.click()
+            self.until(lambda: page.selected() is not None and page.selected()["name"] == "新初始化项目" and bool(page.status_text))
+        self.assertEqual(page.search.text(), "")
+        self.assertEqual(len(self.workspace.list_projects(TaskContext())["projects"]), 2)
+
+    def test_scoped_resource_create_inherits_project_and_survives_previous_filters(self):
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        project = self.window.project_page
+        self.until(lambda: bool(project.status_text))
+        page = self.window.catalog_page
+        page.search.setText("找不到")
+        page.kind.setCurrentIndex(page.kind.findData("mcp"))
+        page.favorite.setChecked(True)
+        project.resource_button.click()
+        self.until(lambda: page.listing.count() == 1)
+        def fill(dialog):
+            self.assertEqual(dialog.fields["projects"].text(), self.project["project_id"])
+            dialog.fields["name"].setText("项目专属 Skill")
+            dialog.kind.setCurrentIndex(dialog.kind.findData("skill"))
+            return QDialog.DialogCode.Accepted
+        with patch.object(CatalogDialog, "exec", fill):
+            page.edit_item(None)
+        self.until(lambda: page.listing.count() == 2)
+        entry = next(i for i in page.items if i["name"] == "项目专属 Skill")
+        self.assertEqual(entry["metadata"]["projects"], [self.project["project_id"]])
+        page.search.setText("找不到")
+        page.favorite.setChecked(True)
+        page.clear_scope()
+        self.assertEqual(page.listing.count(), 2)
+
+    def test_invalid_project_workspace_does_not_hide_today_plan(self):
+        self.store.set_setting("project_workspace", str(self.root / "missing-workspace"))
+        self.store.set_setting("workbench_root", str(self.daily.files.root))
+        self.window.today_page.refresh()
+        self.until(lambda: any("工作区需要检查" in error for error in self.window.today_page.project_errors))
+        self.assertEqual(self.window.today_page.tasks.item(0).text(), "验证恢复")
+        self.assertTrue(self.window.today_page.edit_button.isEnabled())
+
+    def test_failed_folder_open_shows_feedback_and_does_not_record_agent_use(self):
+        self.window.agent_page.refresh(self.agent.id)
+        with patch("agent_manager.ui.window.QDesktopServices.openUrl", return_value=False), patch("agent_manager.ui.window.QMessageBox.warning") as warning:
+            self.window.agent_page.open_agent()
+            warning.assert_called_once()
+        self.assertFalse(self.store.evidence("agent-used:" + self.agent.id))
+        self.store.remove_resource(self.agent.id)
+        self.window.agent_page.refresh()
+        self.assertTrue(all(not action.isEnabled() for action in self.window.agent_page.actions))
+
+    def test_agent_note_save_opens_saved_markdown_in_library_after_location_change(self):
+        location = self.root / "new-notes"
+        self.store.set_setting("workbench_root", str(location))
+        self.window.navigation.setCurrentRow(self.window.AGENT)
+        self.window.agent_page.refresh(self.agent.id)
+        def fill(dialog):
+            dialog.body.setPlainText("Agent 备注保存验证")
+            return QDialog.DialogCode.Accepted
+        with patch.object(CatalogDialog, "exec", fill):
+            self.window.agent_page.notes()
+            self.until(lambda: self.window.navigation.currentRow() == self.window.LIBRARY and self.window.catalog_page.listing.count() == 1)
+        self.assertIn("Agent 备注保存验证", self.window.catalog_page.preview.toPlainText())
+        self.assertEqual(Catalog(location).scan()["items"][0]["metadata"]["agents"], [self.agent.id])
+        self.window.navigation.setCurrentRow(self.window.AGENT)
+        def edit(dialog):
+            self.assertIn("Agent 备注保存验证", dialog.body.toPlainText())
+            dialog.body.setPlainText("Agent 备注更新验证")
+            return QDialog.DialogCode.Accepted
+        with patch.object(CatalogDialog, "exec", edit):
+            self.window.agent_page.notes()
+            self.until(lambda: self.window.navigation.currentRow() == self.window.LIBRARY and "更新验证" in self.window.catalog_page.preview.toPlainText())
+        self.assertEqual(len(Catalog(location).scan()["items"]), 1)
+
     def test_daily_refreshes_even_when_atomic_save_notification_is_missed(self):
         page = self.window.today_page
         self.until(lambda: not page.worker)

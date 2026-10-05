@@ -338,7 +338,11 @@ class TodayPage(MarkdownPage):
             projects, errors, watches = [], [], [str(notes_root), str(Path(report["path"]).parent), report["path"]]
             if root:
                 workspace = ProjectWorkspace(Path(root))
-                listing = workspace.list_projects(context)
+                try:
+                    listing = workspace.list_projects(context)
+                except (UserError, OSError) as exc:
+                    listing = {"projects": []}
+                    errors.append("项目工作区需要检查：" + str(exc))
                 for item in listing["projects"]:
                     if item["path"].startswith("archive/"):
                         continue
@@ -346,7 +350,7 @@ class TodayPage(MarkdownPage):
                         doc = workspace.document(item["id"], "agent/STATUS.md")
                         projects.append({**item, **project_context(doc["text"], item["state"])})
                         watches.append(doc["path"])
-                    except UserError:
+                    except (UserError, OSError):
                         errors.append(item["name"] + "：项目状态需要检查。")
                 watches += [str(workspace.registry_path), str(workspace.registry_path.parent)]
             return {"daily": report, "projects": projects, "errors": errors, "watches": watches}
@@ -678,9 +682,11 @@ class CatalogPage(MarkdownPage):
         actions.addWidget(self.favorite_button)
         self.obsidian_button = control("Obsidian 中打开", lambda: self.open_obsidian(self.selected()["path"]) if self.selected() else None)
         actions.addWidget(self.obsidian_button)
-        actions.addWidget(control("打开来源", self.open_source))
-        actions.addWidget(control("查看本地目录", self.open_local))
-        actions.addWidget(control("清除项目 / Agent 筛选", self.clear_scope))
+        self.source_button = control("打开来源", self.open_source)
+        self.local_button = control("查看本地目录", self.open_local)
+        actions.addWidget(self.source_button)
+        actions.addWidget(self.local_button)
+        actions.addWidget(control("显示全部资源", self.clear_scope))
         pane.addLayout(actions)
         self.preview = QTextBrowser()
         self.preview.setOpenExternalLinks(False)
@@ -755,8 +761,9 @@ class CatalogPage(MarkdownPage):
 
     def selected_changed(self, *_):
         item = self.selected()
-        for widget in (self.edit_button, self.favorite_button, self.obsidian_button):
+        for widget in (self.edit_button, self.favorite_button, self.obsidian_button, self.local_button):
             widget.setEnabled(item is not None)
+        self.source_button.setEnabled(bool(item and item["metadata"].get("source")))
         if not item:
             self.preview.setPlainText("还没有匹配资源。点击“收藏新资源”，或将带 frontmatter 的 Markdown 放入工作台的“资源”文件夹。")
             return
@@ -767,12 +774,24 @@ class CatalogPage(MarkdownPage):
             text += "\n\n## 我的备注\n\n" + str(metadata["notes"])
         self.preview.setMarkdown(text)
 
-    def edit_item(self, item):
+    def edit_item(self, item, on_saved=None):
         dialog = CatalogDialog(self, item)
+        if item is None:
+            dialog.fields["projects"].setText(self.project_filter)
+            dialog.fields["agents"].setText(self.agent_filter)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        metadata, body, catalog = dialog.metadata(), dialog.body.toPlainText(), self.catalog
-        self.window.submit(None, "保存资源 Markdown", lambda context: catalog.save(metadata, body, item), lambda _: self.refresh(), persist_result=False)
+        metadata, body = dialog.metadata(), dialog.body.toPlainText()
+        catalog = Catalog(work_root(self.window.store))
+        if item is None:
+            self.search.clear()
+            self.kind.setCurrentIndex(0)
+            self.favorite.setChecked(False)
+        def saved(_):
+            self.refresh()
+            if on_saved:
+                on_saved()
+        self.window.submit(None, "保存资源 Markdown", lambda context: catalog.save(metadata, body, item), saved, persist_result=False)
 
     def toggle_favorite(self):
         item, catalog = self.selected(), self.catalog
@@ -783,7 +802,8 @@ class CatalogPage(MarkdownPage):
         if url.scheme() not in {"https", "http"} or not url.host() or url.userName() or url.password():
             QMessageBox.information(self, "打开来源", "只支持不含登录凭据的 http / https 链接。")
             return
-        QDesktopServices.openUrl(url)
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.information(self, "打开来源", "系统未能打开链接，请检查默认浏览器设置。")
 
     def open_source(self):
         item = self.selected()
@@ -797,9 +817,15 @@ class CatalogPage(MarkdownPage):
             path = Path(value) if value else Path(item["path"]).parent
             self.window.open_path(path if path.is_dir() else path.parent)
 
-    def clear_scope(self):
-        self.project_filter, self.agent_filter, self.related_ids = "", "", []
+    def set_scope(self, project="", agent="", related=()):
+        self.project_filter, self.agent_filter, self.related_ids = project, agent, list(related)
+        self.search.clear()
+        self.kind.setCurrentIndex(0)
+        self.favorite.setChecked(False)
         self.render()
+
+    def clear_scope(self):
+        self.set_scope()
 
 
 class AgentPage(QWidget):
@@ -829,9 +855,12 @@ class AgentPage(QWidget):
         panel = QWidget()
         pane = QVBoxLayout(panel)
         row = FlowLayout()
+        self.actions = []
         for text, action in (("打开常用入口", self.open_agent), ("查看记录", self.records),
                              ("相关资源", self.resources), ("写备注", self.notes), ("编辑登记", self.edit), ("查看目录", self.directory), ("备份与恢复", self.safety)):
-            row.addWidget(control(text, action))
+            widget = control(text, action)
+            self.actions.append(widget)
+            row.addWidget(widget)
         pane.addLayout(row)
         self.details = QTextBrowser()
         self.details.setOpenExternalLinks(False)
@@ -865,6 +894,8 @@ class AgentPage(QWidget):
 
     def render(self, *_):
         resource = self.selected()
+        for action in self.actions:
+            action.setEnabled(resource is not None)
         if not resource:
             self.details.setPlainText("先登记你的 Agent。已有登记、备份和配置会自动显示。")
             return
@@ -898,6 +929,8 @@ class AgentPage(QWidget):
                 return
             if QDesktopServices.openUrl(url):
                 self.used(resource)
+            else:
+                QMessageBox.information(self, "常用入口", "系统未能打开链接，请检查默认浏览器设置。")
         elif resource.options.get("executable") and resource.kind != "hermes_server":
             self.window.perform(resource, "start")
             self.used(resource)
@@ -906,8 +939,8 @@ class AgentPage(QWidget):
         else:
             value = self.local_directory(resource)
             if value:
-                self.window.open_path(Path(value))
-                self.used(resource)
+                if self.window.open_path(Path(value)):
+                    self.used(resource)
 
     def records(self):
         resource = self.selected()
@@ -917,8 +950,7 @@ class AgentPage(QWidget):
     def resources(self):
         resource = self.selected()
         if resource:
-            self.window.catalog_page.agent_filter = resource.id
-            self.window.catalog_page.project_filter = ""
+            self.window.catalog_page.set_scope(agent=resource.id)
             self.window.navigation.setCurrentRow(self.window.LIBRARY)
 
     def edit(self):
@@ -949,9 +981,10 @@ class AgentPage(QWidget):
         page = self.window.catalog_page
         catalog = Catalog(work_root(self.window.store))
         def loaded(report):
+            page.catalog = catalog
             item = next((i for i in report["items"] if i["type"] == "agent" and resource.id in i["metadata"].get("agents", [])), None)
             if item:
-                page.edit_item(item)
+                page.edit_item(item, self.resources)
             else:
                 dialog = CatalogDialog(self)
                 dialog.fields["name"].setText(resource.name + " · 使用说明与备注")
@@ -959,7 +992,7 @@ class AgentPage(QWidget):
                 dialog.fields["agents"].setText(resource.id)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     metadata, body = dialog.metadata(), dialog.body.toPlainText()
-                    self.window.submit(None, "保存 Agent 备注 Markdown", lambda context: catalog.save(metadata, body), lambda _: page.refresh(), persist_result=False)
+                    self.window.submit(None, "保存 Agent 备注 Markdown", lambda context: catalog.save(metadata, body), lambda _: self.resources(), persist_result=False)
         self.window.submit(None, "定位 Agent 备注", catalog.scan, loaded, persist_result=False)
 
     def safety(self):

@@ -173,6 +173,7 @@ class WorkbenchTests(unittest.TestCase):
     def test_legacy_phase_paragraph_does_not_turn_into_daily_stage_label(self):
         text = "---\nproject_id: P-2026-001\nstatus: active\n---\n- 当前阶段：" + "原有详细进展说明" * 30 + "\n- 下一步：读取最近验证结果。\n"
         self.assertEqual(project_context(text, "active")["phase"], "进行中")
+        self.assertEqual(project_context(text.replace("原有详细进展说明" * 30, "L0 基础了解与概念地图，学习中。后续详细说明保留。"), "active")["phase"], "L0 基础了解与概念地图，学习中")
         self.assertIn("原有详细进展说明", text)
         workspace = ProjectWorkspace(self.root / "workspace")
         context = TaskContext()
