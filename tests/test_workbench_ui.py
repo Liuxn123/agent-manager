@@ -85,7 +85,17 @@ class WorkbenchUITests(unittest.TestCase):
         path = Path(self.daily.load()["path"])
         replacement = path.with_suffix(".tmp")
         replacement.write_text(self.daily.load()["text"].replace("验证恢复", "Obsidian 修改任务"), encoding="utf-8")
-        replacement.replace(path)
+        # External editors also retry Windows rename sharing violations. Waiting
+        # for our reader alone does not cover antivirus / filesystem notifications.
+        for attempt in range(40):
+            try:
+                replacement.replace(path)
+                break
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 39:
+                    raise
+                self.app.processEvents()
+                time.sleep(.05)
         self.until(lambda: "Obsidian 修改任务" in page.tasks.item(0).text())
         with patch("agent_manager.ui.workbench.QDesktopServices.openUrl", return_value=True) as opened:
             page.open_daily()
