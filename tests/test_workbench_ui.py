@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import Qt, QPoint, QDate
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit, QVBoxLayout, QMessageBox
 
 from agent_manager.domain import Resource
 from agent_manager.storage import Store
@@ -28,6 +28,13 @@ class WorkbenchUITests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        self.feedback = []
+        # Headless CI must report unexpected feedback instead of waiting forever
+        # for somebody to dismiss a native modal. Individual dialog tests override this.
+        for name in ("warning", "information"):
+            feedback = patch.object(QMessageBox, name, side_effect=lambda *args: self.feedback.append(str(args[1:])) or QMessageBox.StandardButton.Ok)
+            feedback.start()
+            self.addCleanup(feedback.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.workspace = ProjectWorkspace(self.root / "workspace")
@@ -53,7 +60,7 @@ class WorkbenchUITests(unittest.TestCase):
                 return
             QTest.qWait(15)
             time.sleep(.003)
-        self.fail("UI operation timed out: " + str([(t["title"], t["state"], t["result"]) for t in self.store.tasks()[:5]]))
+        self.fail("UI operation timed out: " + str([(t["title"], t["state"], t["result"]) for t in self.store.tasks()[:5]]) + " feedback=" + str(self.feedback))
 
     def tearDown(self):
         self.until(lambda: not self.window.jobs and not self.window.today_page.worker and not self.window.catalog_page.worker and not self.window.agent_status_worker)
@@ -61,6 +68,7 @@ class WorkbenchUITests(unittest.TestCase):
         self.window.pool.waitForDone(5000)
         self.app.processEvents()
         self.temp.cleanup()
+        self.assertEqual(self.feedback, [], "Unexpected GUI feedback in headless test")
 
     def test_daily_is_default_and_checkbox_and_obsidian_edit_share_original_file(self):
         self.assertEqual([self.window.navigation.item(i).text() for i in range(6)], ["今日", "项目", "Agent", "资源库", "数据安全", "设置"])
