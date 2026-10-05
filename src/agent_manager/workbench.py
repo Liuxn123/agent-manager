@@ -160,6 +160,35 @@ class Daily:
     def save(self, text, expected):
         return self.files.write(self.relative, text, expected)
 
+    def add_entry(self, section, title, expected, priority="", time=""):
+        """Append one human-editable bullet while preserving every existing section."""
+        if section not in {"日程", "今日任务"}:
+            raise UserError("只能添加日程或今日任务。")
+        title = title.strip()
+        if not title or len(title) > 240 or "\n" in title or "\r" in title:
+            raise UserError("请填写 1–240 字的一行内容。")
+        if priority not in {"", "高", "中", "低"}:
+            raise UserError("请选择有效的优先级。")
+        time = time.strip().replace("：", ":").replace("—", "–").replace("-", "–")
+        clock = r"(?:[01]\d|2[0-3]):[0-5]\d"
+        pattern = clock + (r"(?:\s*–\s*" + clock + ")?" if section == "日程" else "")
+        if time and not re.fullmatch(pattern, time):
+            raise UserError("时间使用 09:00；日程也可填写 09:00–10:00。")
+        if section == "今日任务":
+            entry = "- [ ] " + ("[" + priority + "] " if priority else "") + title + (" @" + time if time else "")
+        else:
+            entry = "- " + (time + " " if time else "") + title
+        text = self.template() if expected is None else expected
+        heading = re.search(r"(?m)^## " + section + r"\s*$", text)
+        if heading:
+            following = re.search(r"(?m)^## ", text[heading.end():])
+            position = heading.end() + following.start() if following else len(text)
+            before, after = text[:position], text[position:]
+            text = before.rstrip("\r\n") + "\n" + entry + "\n\n" + after
+        else:
+            text = text.rstrip("\r\n") + "\n\n## " + section + "\n" + entry + "\n"
+        return self.save(text, expected)
+
     def toggle(self, line, done, expected):
         if expected is None:
             raise UserError("请先添加今日任务。")
@@ -168,6 +197,15 @@ class Daily:
             raise UserError("任务位置已改变，请刷新。")
         lines[line] = re.sub(r"^(\s*[-*] )(?:\[[ xX]\] )?", lambda m: m[1] + ("[x] " if done else "[ ] "), lines[line])
         return self.save("".join(lines), expected)
+
+
+def task_details(text):
+    """Optional [高/中/低] and @HH:MM markers; legacy task text remains valid."""
+    priority = re.match(r"^\[([高中低])\]\s+", text)
+    title = text[priority.end():] if priority else text
+    clock = re.search(r"\s+@((?:[01]\d|2[0-3]):[0-5]\d)$", title)
+    return {"title": title[:clock.start()] if clock else title,
+            "priority": priority[1] if priority else "", "time": clock[1] if clock else ""}
 
 
 class Catalog:

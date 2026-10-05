@@ -1,4 +1,4 @@
-# Agent 管家 · v0.7.0
+# Agent 管家 · v0.7.1
 
 **每天开始 Agent 工作的个人工作台，用来管理今日工作、项目、Agent、Prompt/Skills/MCP 等资源，并保护重要 Agent 数据。**
 
@@ -32,7 +32,7 @@ macOS / Linux：激活虚拟环境后 `python -m pip install -e . && python -m a
 第一次打开：
 
 1. 在“项目”选择已有规范工作区（含 `agent/projects.json`），或初始化一个空文件夹。
-2. 在“今日”编辑今日计划；任务勾选立即写回每日 Markdown。
+2. 在“今日”点“添加任务”或“添加日程”；任务支持优先级、时间和勾选，立即写回每日 Markdown。需要整体整理时点“编辑今日计划”。
 3. 进入项目查看阶段与下一步，必要时添加关联 Agent 和资源。
 4. 在“Agent”登记常用工具，在“资源库”收藏说明与 Prompt。
 5. 需要保护资料时进入“数据安全”，沿用已有备份登记、口令与恢复流程。
@@ -79,7 +79,7 @@ Agent工作台/
 - [恢复范围与限制](src/agent_manager/assets/docs/RESTORE_SCOPE.md)
 - [架构与数据关系](docs/ARCHITECTURE.md)
 - [路线图](docs/ROADMAP.md)
-- [v0.7.0 版本说明](docs/RELEASE_NOTES.md)
+- [版本说明](docs/RELEASE_NOTES.md)
 - [性能检查](docs/PERFORMANCE.md)
 - [本机验证记录](docs/VALIDATION.md)
 

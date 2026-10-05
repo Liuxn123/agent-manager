@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import date
 from pathlib import Path
 
@@ -8,16 +9,18 @@ from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher, QEvent, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextBrowser, QTextEdit, QSplitter, QListWidget, QListWidgetItem, QDialog,
-    QDialogButtonBox, QFormLayout, QLineEdit, QComboBox, QCheckBox, QScrollArea, QMessageBox)
+    QDialogButtonBox, QFormLayout, QLineEdit, QComboBox, QCheckBox, QScrollArea, QMessageBox,
+    QGridLayout)
 
 from ..domain import UserError
 from ..project_workspaces import ProjectWorkspace
 from ..runtime import TaskContext
 from ..storage import now
-from ..workbench import Daily, Catalog, TYPES, work_root, markdown_uri, project_context
+from ..workbench import Daily, Catalog, TYPES, work_root, markdown_uri, project_context, task_details
 from .components import FlowLayout
 from .tasks import ReadWorker
 from .presentation import readable_time
+from .today_widgets import Metric, Section, TodayList, DailyEntryDialog, BackupButton, ROW_DATA, COLORS, link, label
 
 
 def control(text, action, primary=False):
@@ -134,81 +137,172 @@ class MarkdownPage(QWidget):
 class TodayPage(MarkdownPage):
     def __init__(self, window):
         super().__init__(window)
+        self.setObjectName("TodayPage")
         self.day, self.report, self.projects = date.today(), None, []
+        self.project_errors = []
+        self.focus_elapsed, self.focus_started = 0.0, None
+        self.narrow = None
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
         top = QHBoxLayout()
-        self.heading = QLabel()
+        self.heading = label("", "TodayDate")
         self.heading.setWordWrap(True)
-        self.heading.setObjectName("Title")
         top.addWidget(self.heading, 1)
-        top.addWidget(control("编辑今日计划", self.edit_today, True))
+        self.edit_button = control("编辑今日计划", self.edit_today, True)
+        top.addWidget(self.edit_button)
         layout.addLayout(top)
-        open_row = QHBoxLayout()
-        open_row.addWidget(control("Obsidian 中打开", self.open_daily))
-        open_row.addStretch()
-        layout.addLayout(open_row)
-        note = QLabel("先看今天做什么，再进入项目继续工作。日程和任务与你的 Markdown 共用。")
-        note.setWordWrap(True)
-        note.setObjectName("Subtitle")
-        layout.addWidget(note)
-        split = QSplitter(Qt.Orientation.Horizontal)
-        plan = QWidget()
-        left = QVBoxLayout(plan)
-        left.setContentsMargins(0, 12, 6, 0)
-        left.addWidget(QLabel("今天的日程"))
-        self.schedule = QListWidget()
-        self.schedule.setMaximumHeight(180)
-        self.schedule.setWordWrap(True)
-        left.addWidget(self.schedule)
-        left.addWidget(QLabel("今日任务 · 勾选即保存"))
-        self.tasks = QListWidget()
-        self.tasks.setWordWrap(True)
+        note = QHBoxLayout()
+        note.addWidget(label("先选一件事，再进入项目继续工作。", "TodayMuted"), 1)
+        self.focus_button = control("开始专注", self.toggle_focus)
+        self.focus_button.setToolTip("手动开始 / 暂停；只计本次打开的专注时间，不采集 Agent 使用时长。")
+        self.focus_button.setObjectName("FocusButton")
+        note.addWidget(self.focus_button)
+        layout.addLayout(note)
+        self.metric_grid = QGridLayout()
+        self.metric_grid.setSpacing(12)
+        self.metrics = [Metric(title, color, icon, hint) for title, color, icon, hint in zip(
+            ("今日任务", "高优先级", "需要处理", "推进项目"), COLORS, (9, 10, 11, 3),
+            ("勾选即保存", "未完成的重点任务", "项目与资料提醒", "点击项目继续"))]
+        self.metrics[0].add_progress()
+        for i, widget in enumerate(self.metrics):
+            self.metric_grid.addWidget(widget, 0, i)
+        layout.addLayout(self.metric_grid)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setObjectName("TodayScroll")
+        self.body = QWidget()
+        self.body.setObjectName("TodayBody")
+        self.columns_layout = QGridLayout(self.body)
+        self.columns_layout.setContentsMargins(0, 0, 2, 0)
+        self.columns_layout.setSpacing(14)
+        self.columns = [QWidget(), QWidget()]
+        left, right = [QVBoxLayout(panel) for panel in self.columns]
+        for column in (left, right):
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(12)
+
+        self.focus_card = Section("今日重点", 15, "添加任务 ＋", lambda: self.add_entry("今日任务"))
+        self.focus_items = TodayList("focus")
+        self.focus_items.itemDoubleClicked.connect(lambda item: self.edit_today())
+        self.focus_card.body.addWidget(self.focus_items)
+        left.addWidget(self.focus_card)
+        self.task_card = Section("今日任务", 9, "添加任务 ＋", lambda: self.add_entry("今日任务"))
+        self.tasks = TodayList("task")
         self.tasks.itemChanged.connect(self.toggle_task)
-        left.addWidget(self.tasks, 1)
-        self.daily_hint = QLabel("尚未建立今日计划，点击上方编辑。")
+        self.tasks.itemDoubleClicked.connect(lambda item: self.edit_today())
+        self.tasks.setToolTip("点复选框完成任务；选中后按空格也可以勾选。双击打开今日计划。")
+        self.task_card.body.addWidget(self.tasks)
+        self.daily_hint = label("", "TodayMuted")
         self.daily_hint.setWordWrap(True)
-        self.daily_hint.setObjectName("Subtitle")
-        left.addWidget(self.daily_hint)
-        split.addWidget(plan)
-        projects = QWidget()
-        right = QVBoxLayout(projects)
-        right.setContentsMargins(6, 12, 0, 0)
-        right.addWidget(QLabel("需要继续的项目 · 双击进入"))
-        self.continue_projects = QListWidget()
-        self.continue_projects.setMinimumHeight(120)
-        self.continue_projects.setWordWrap(True)
-        self.continue_projects.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.task_card.body.addWidget(self.daily_hint)
+        left.addWidget(self.task_card)
+        self.schedule_card = Section("时间轴日程", 8, "添加日程 ＋", lambda: self.add_entry("日程"))
+        self.schedule = TodayList("schedule")
+        self.schedule.itemDoubleClicked.connect(lambda item: self.edit_today())
+        self.schedule_card.body.addWidget(self.schedule)
+        left.addWidget(self.schedule_card)
+        quick = Section("快捷操作", 14)
+        actions = FlowLayout()
+        for title, action, color in (
+            ("进入项目", lambda: window.navigation.setCurrentRow(window.PROJECT), "blue"),
+            ("打开 Agent", lambda: window.navigation.setCurrentRow(window.AGENT), "purple"),
+            ("找 Prompt / Skill", lambda: window.navigation.setCurrentRow(window.LIBRARY), "green"),
+            ("打开 Obsidian", self.open_daily, "purple")):
+            action_button = control(title, action)
+            action_button.setProperty("quickColor", color)
+            actions.addWidget(action_button)
+        quick.body.addLayout(actions)
+        left.addWidget(quick)
+        left.addStretch()
+
+        self.project_card = Section("需要继续的项目", 3, "全部项目 →", lambda: window.navigation.setCurrentRow(window.PROJECT))
+        self.continue_projects = TodayList("project")
         self.continue_projects.itemDoubleClicked.connect(self.open_project)
-        right.addWidget(self.continue_projects, 2)
-        right.addWidget(QLabel("最近工作的项目"))
-        self.recent_projects = QListWidget()
-        self.recent_projects.setWordWrap(True)
-        self.recent_projects.setMaximumHeight(85)
+        self.project_card.body.addWidget(self.continue_projects)
+        right.addWidget(self.project_card)
+        self.recent_card = Section("最近工作", 13, "查看项目 →", lambda: window.navigation.setCurrentRow(window.PROJECT))
+        self.recent_projects = TodayList("recent")
         self.recent_projects.itemDoubleClicked.connect(self.open_project)
-        right.addWidget(self.recent_projects)
-        right.addWidget(QLabel("需要我处理"))
-        self.attention = QListWidget()
-        self.attention.setWordWrap(True)
-        self.attention.setMaximumHeight(100)
+        self.recent_card.body.addWidget(self.recent_projects)
+        right.addWidget(self.recent_card)
+        self.attention_card = Section("需要处理", 11, "数据安全 →", lambda: window.navigation.setCurrentRow(window.SAFETY))
+        self.attention = TodayList("alert")
         self.attention.itemDoubleClicked.connect(self.open_attention)
-        right.addWidget(self.attention)
-        self.safety = QLabel()
+        self.attention_card.body.addWidget(self.attention)
+        right.addWidget(self.attention_card)
+        protection = Section("资料与备份状态", 12, "查看 →", lambda: window.navigation.setCurrentRow(window.SAFETY))
+        self.safety = label("", "TodayMuted")
         self.safety.setWordWrap(True)
-        self.safety.setObjectName("Subtitle")
-        right.addWidget(self.safety)
-        split.addWidget(projects)
-        split.setSizes([470, 540])
-        layout.addWidget(split, 1)
-        bottom = FlowLayout()
-        bottom.addWidget(control("进入项目", lambda: window.navigation.setCurrentRow(window.PROJECT)))
-        bottom.addWidget(control("打开 Agent", lambda: window.navigation.setCurrentRow(window.AGENT)))
-        bottom.addWidget(control("找 Prompt / Skill", lambda: window.navigation.setCurrentRow(window.LIBRARY)))
-        bottom.addWidget(control("旧版工作笔记", self.legacy_notes))
-        layout.addLayout(bottom)
+        protection.body.addWidget(self.safety)
+        self.backup_tiles = QWidget()
+        self.backup_layout = QGridLayout(self.backup_tiles)
+        self.backup_layout.setContentsMargins(0, 0, 0, 0)
+        self.backup_layout.setSpacing(6)
+        self.backup_signature = None
+        protection.body.addWidget(self.backup_tiles)
+        right.addWidget(protection)
+        right.addWidget(link("旧版工作笔记", self.legacy_notes), 0, Qt.AlignmentFlag.AlignRight)
+        right.addStretch()
+        self.scroll.setWidget(self.body)
+        layout.addWidget(self.scroll, 1)
         self.clock_timer = QTimer(self)
         self.clock_timer.setInterval(2_000)
         self.clock_timer.timeout.connect(self.check_day)
         self.clock_timer.start()
+        self.focus_timer = QTimer(self)
+        self.focus_timer.setInterval(1_000)
+        self.focus_timer.timeout.connect(self.update_focus)
+        self.arrange_columns()
+
+    def arrange_columns(self):
+        narrow, stacked = self.width() < 860, self.width() < 640
+        if (narrow, stacked) == self.narrow:
+            return
+        self.narrow = (narrow, stacked)
+        for panel in self.columns:
+            self.columns_layout.removeWidget(panel)
+        for i, panel in enumerate(self.columns):
+            self.columns_layout.addWidget(panel, i if stacked else 0, 0 if stacked else i, Qt.AlignmentFlag.AlignTop)
+        self.columns_layout.setColumnStretch(0, 1)
+        self.columns_layout.setColumnStretch(1, 0 if stacked else 1)
+        for widget in self.metrics:
+            self.metric_grid.removeWidget(widget)
+        for i, widget in enumerate(self.metrics):
+            widget.icon.setVisible(not narrow)
+            self.metric_grid.addWidget(widget, i // 2 if stacked else 0, i % 2 if stacked else i)
+        for i in range(4):
+            self.metric_grid.setColumnStretch(i, 1 if not stacked or i < 2 else 0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "columns"):
+            self.arrange_columns()
+
+    def toggle_focus(self):
+        if self.focus_started is None:
+            self.focus_started = time.monotonic()
+            self.focus_timer.start()
+        else:
+            self.focus_elapsed += time.monotonic() - self.focus_started
+            self.focus_started = None
+            self.focus_timer.stop()
+        self.update_focus()
+
+    def update_focus(self):
+        elapsed = self.focus_elapsed + (time.monotonic() - self.focus_started if self.focus_started is not None else 0)
+        minutes, seconds = divmod(int(elapsed), 60)
+        self.focus_button.setText(("暂停专注" if self.focus_started is not None else "开始专注") + (f" · {minutes:02d}:{seconds:02d}" if elapsed else ""))
+
+    def add_entry(self, section):
+        if not self.report:
+            return
+        expected, daily = self.report["original"], self.daily()
+        dialog = DailyEntryDialog(self, section)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            title, priority, clock = dialog.values()
+            self.window.submit(None, "添加" + ("任务" if section == "今日任务" else "日程"),
+                lambda context: daily.add_entry(section, title, expected, priority, clock), lambda _: self.refresh(), persist_result=False)
 
     def daily(self):
         return Daily(work_root(self.window.store), self.day)
@@ -216,6 +310,10 @@ class TodayPage(MarkdownPage):
     def check_day(self):
         if self.day != date.today():
             self.day = date.today()
+            self.focus_elapsed = 0.0
+            if self.focus_started is not None:
+                self.focus_started = time.monotonic()
+            self.update_focus()
             self.refresh()
         elif self.isVisible() and self.report and not self.worker:
             # macOS may coalesce or miss notifications after an atomic editor save.
@@ -262,7 +360,14 @@ class TodayPage(MarkdownPage):
     def render_daily(self, report):
         self.report = report
         self.schedule.clear()
-        self.schedule.addItems([item["text"] for item in self.report["schedule"]] or ["暂无日程。可以直接在今日 Markdown 添加时间和安排。"])
+        for row in report["schedule"]:
+            item = QListWidgetItem(row["text"])
+            item.setData(ROW_DATA, row)
+            item.setToolTip(row["text"])
+            self.schedule.addItem(item)
+        if not self.schedule.count():
+            self.schedule.addItem("暂无日程，点右上角添加一项安排。")
+        self.schedule.fit(4)
         self.tasks.blockSignals(True)
         self.tasks.clear()
         for row in self.report["tasks"]:
@@ -270,23 +375,59 @@ class TodayPage(MarkdownPage):
             item.setData(Qt.ItemDataRole.UserRole, row["line"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if row["done"] else Qt.CheckState.Unchecked)
+            item.setData(ROW_DATA, row)
+            item.setToolTip(row["text"])
             self.tasks.addItem(item)
         self.tasks.blockSignals(False)
-        self.daily_hint.setText("还没有今日计划，点“编辑今日计划”开始。" if self.report["original"] is None else "保存到今日 Markdown；Obsidian 修改后会自动刷新。")
+        if not self.tasks.count():
+            item = QListWidgetItem("今天想完成什么？点“添加任务”开始。")
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.tasks.addItem(item)
+        self.tasks.fit(6)
+        count = len(report["tasks"])
+        done = sum(row["done"] for row in report["tasks"])
+        self.task_card.title.setText(f"今日任务  ({done}/{count})")
+        self.daily_hint.setText("点复选框即保存 · 双击编辑 · 与 Obsidian 共用")
+        self.focus_items.clear()
+        outstanding = [row for row in report["tasks"] if not row["done"]]
+        priority = {"高": 0, "中": 1, "": 2, "低": 3}
+        outstanding.sort(key=lambda row: (priority[task_details(row["text"])["priority"]], task_details(row["text"])["time"] or "24:00", row["line"]))
+        for position, row in enumerate(outstanding[:3]):
+            item = QListWidgetItem(row["text"])
+            item.setData(ROW_DATA, {**row, "position": position})
+            item.setToolTip(row["text"])
+            self.focus_items.addItem(item)
+        if not self.focus_items.count():
+            self.focus_items.addItem("今天的任务都已完成。" if count else "先添加一件今天最想完成的事。")
+        self.focus_items.fit(3)
+        self.metrics[0].value.setText(f"{done} / {count}")
+        self.metrics[0].progress.setValue(round(done * 100 / count) if count else 0)
+        self.metrics[0].note.setText(f"已完成 {round(done * 100 / count)}%" if count else "添加第一项任务")
+        high = sum(task_details(row["text"])["priority"] == "高" for row in outstanding)
+        self.metrics[1].value.setText(str(high) + " 项")
+        self.metrics[1].note.setText("需要优先完成" if high else "没有高优先级任务")
+        self.edit_button.setEnabled(True)
 
     def render_projects(self, report):
         self.continue_projects.clear()
+        self.project_errors = report["errors"]
+        active = []
         for row in self.projects:
             if row["state"] in {"completed", "paused"}:
                 continue
+            active.append(row)
             step = row["next_step"]
             preview = step if len(step) <= 100 else step[:99] + "…"
             item = QListWidgetItem(row["name"] + " · " + row["phase"] + "\n下一步：" + preview)
             item.setToolTip(row["name"] + "\n" + step)
             item.setData(Qt.ItemDataRole.UserRole, row["id"])
+            item.setData(ROW_DATA, {**row, "position": len(active) - 1})
             self.continue_projects.addItem(item)
         if not self.continue_projects.count():
             self.continue_projects.addItem("暂无待继续项目。在“项目”中选择工作区或新建项目。")
+        self.continue_projects.fit(4)
+        self.metrics[3].value.setText(str(len(active)) + " 个")
+        self.metrics[3].note.setText("双击卡片继续工作" if active else "选择工作区或创建项目")
         recent = sorted(self.projects, key=lambda p: (self.window.store.evidence("project-used:" + p["id"]) or {}).get("at", ""), reverse=True)
         self.recent_projects.clear()
         for row in recent[:4]:
@@ -294,15 +435,18 @@ class TodayPage(MarkdownPage):
             if used:
                 item = QListWidgetItem(row["name"] + " · " + readable_time(used["at"]))
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
+                item.setData(ROW_DATA, {"title": row["name"], "at": readable_time(used["at"])})
+                item.setToolTip(row["name"] + " · 最近进入：" + readable_time(used["at"]))
                 self.recent_projects.addItem(item)
         if not self.recent_projects.count():
             self.recent_projects.addItem("进入项目后，这里会显示最近使用。")
+        self.recent_projects.fit(3)
         self.refresh_attention(report["errors"])
         self.watch(report["watches"])
 
     def refresh_attention(self, errors=None):
         self.attention.clear()
-        for value in errors or []:
+        for value in (self.project_errors if errors is None else errors):
             self.attention.addItem(value)
         for row in self.projects:
             if row["state"] == "paused":
@@ -326,11 +470,31 @@ class TodayPage(MarkdownPage):
                 item = QListWidgetItem(resource.name + "：连接或网关异常，进入数据安全检查。")
                 item.setData(Qt.ItemDataRole.UserRole, ("safety", resource.id))
                 self.attention.addItem(item)
-        if not self.attention.count():
+        count = self.attention.count()
+        for i in range(count):
+            item = self.attention.item(i)
+            item.setData(ROW_DATA, {"title": item.text()})
+            item.setToolTip(item.text())
+        if not count:
             self.attention.addItem("目前没有需要处理的异常。")
+        self.attention.fit(3)
+        self.metrics[2].value.setText(str(count) + " 项")
+        self.metrics[2].note.setText("双击查看具体事项" if count else "暂无待处理异常")
+        self.attention_card.title.setText("需要处理" + (f"  ({count})" if count else ""))
         health = getattr(self.window, "dashboard_health", [])
-        details = [r.name + "：" + (readable_time(h["created_at"]) if h.get("created_at") else "尚未备份") for r, h in health if r.kind in {"hermes_local", "agent"}]
-        self.safety.setText(" · ".join(details[:3]) or "重要资料的备份状态和恢复入口在“数据安全”。")
+        rows = [(r, h) for r, h in health if r.kind in {"hermes_local", "agent"}]
+        signature = [(r.id, r.name, h.get("state"), h.get("created_at")) for r, h in rows[:4]]
+        self.safety.setText("显示已记录的备份结果，运行状态需按需检查。" if rows else "重要资料的备份与恢复在“数据安全”。")
+        if signature != self.backup_signature:
+            self.backup_signature = signature
+            while self.backup_layout.count():
+                widget = self.backup_layout.takeAt(0).widget()
+                if widget:
+                    widget.deleteLater()
+            for i, (resource, status) in enumerate(rows[:4]):
+                tile = BackupButton(resource.name, status.get("state", "待检查") + " · " + (readable_time(status["created_at"]) if status.get("created_at") else "暂无备份"))
+                tile.clicked.connect(lambda checked=False, resource=resource: self.window.open_safety_resource(resource))
+                self.backup_layout.addWidget(tile, i // 2, i % 2)
 
     def edit_today(self):
         if not self.report:
@@ -341,7 +505,7 @@ class TodayPage(MarkdownPage):
             self.window.submit(None, "保存今日计划", lambda context: daily.save(text, expected), lambda _: self.refresh(), persist_result=False)
 
     def toggle_task(self, item):
-        if not self.report:
+        if not self.report or item.data(Qt.ItemDataRole.UserRole) is None:
             return
         daily, expected, line = self.daily(), self.report["original"], item.data(Qt.ItemDataRole.UserRole)
         done = item.checkState() == Qt.CheckState.Checked
@@ -401,6 +565,7 @@ class TodayPage(MarkdownPage):
 
     def stop_updates(self):
         self.clock_timer.stop()
+        self.focus_timer.stop()
         super().stop_updates()
 
 

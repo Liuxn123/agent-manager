@@ -11,6 +11,7 @@ from agent_manager.runtime import TaskContext
 from agent_manager.project_workspaces import ProjectWorkspace
 from agent_manager.workbench import (Daily, Catalog, MarkdownFiles, work_root, migrate_workbench,
     project_context, set_project_details, append_stage, summaries, stage_template, markdown_uri)
+from agent_manager.workbench import task_details
 
 
 class WorkbenchTests(unittest.TestCase):
@@ -34,6 +35,32 @@ class WorkbenchTests(unittest.TestCase):
             daily.save("overwrite", original)
         self.assertEqual(daily.load()["text"], changed)
         self.assertNotEqual(Daily(self.root, date(2026, 10, 6)).relative, daily.relative)
+
+    def test_quick_daily_entries_preserve_notes_validate_input_and_reject_stale_file(self):
+        daily = Daily(self.root)
+        daily.add_entry("今日任务", "完成恢复验证", None, "高", "10:00")
+        report = daily.load()
+        self.assertEqual(task_details(report["tasks"][0]["text"]), {"title": "完成恢复验证", "priority": "高", "time": "10:00"})
+        saved = report["text"] + "\n## 人工记录\n不覆盖我的备注\n"
+        daily.save(saved, report["original"])
+        with self.assertRaises(UserError):
+            daily.add_entry("今日任务", "过期编辑", report["original"])
+        daily.add_entry("日程", "测试 Hermes", saved, time="09:00-10:00")
+        changed = daily.load()["text"]
+        self.assertIn("09:00–10:00 测试 Hermes", changed)
+        self.assertIn("## 人工记录\n不覆盖我的备注", changed)
+        self.assertEqual(changed.count("## 今日任务"), 1)
+        for clock in ("25:00", "09:61", "明天", "09:00–10:00"):
+            with self.assertRaises(UserError):
+                daily.add_entry("今日任务", "错误时间", changed, time=clock)
+        with self.assertRaises(UserError):
+            daily.add_entry("今日任务", "第一行\n## 标题", changed)
+        self.assertEqual(daily.load()["text"], changed)
+        self.assertEqual(task_details("普通旧任务"), {"title": "普通旧任务", "priority": "", "time": ""})
+        no_heading = "# 自定义日期\n\n## 工作记录\n原有记录\n"
+        daily.save(no_heading, changed)
+        daily.add_entry("今日任务", "补充任务", no_heading)
+        self.assertIn("原有记录\n\n## 今日任务\n- [ ] 补充任务", daily.load()["text"])
 
     def test_read_does_not_create_workspace_and_boundaries_reject_links_and_large_files(self):
         root = self.root / "missing"

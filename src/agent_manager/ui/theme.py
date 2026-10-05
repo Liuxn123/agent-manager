@@ -19,12 +19,12 @@ STYLE = """
 QWidget { font-size: 13px; color: #27334f; }
 QMainWindow, QWidget#Content { background: #f5f6fb; }
 QWidget#DashboardBody { background: #f5f6fb; }
-QWidget#Sidebar { background: #151d35; }
+QWidget#Sidebar { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #101d38,stop:1 #17213b); }
 QLabel#Brand { color: #ffffff; font-size: 23px; font-weight: 700; }
 QLabel#BrandSub { color: #8e9abb; font-size: 11px; }
 QListWidget#Navigation { background: transparent; border: none; color: #b3bdd5; outline: none; }
 QListWidget#Navigation::item { padding: 8px 12px; margin: 2px 0px; border-radius: 6px; border: none; }
-QListWidget#Navigation::item:selected { background: #303f72; color: #ffffff; }
+QListWidget#Navigation::item:selected { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2867df,stop:1 #244c9b); color: #ffffff; }
 QListWidget#Navigation::item:hover { background: #222d4b; }
 QListWidget#ActionList { background: #ffffff; border: none; }
 QListWidget#ActionList::item { padding: 5px; border-bottom: 1px solid #edf0f6; }
@@ -87,4 +87,22 @@ QWidget#SettingsPage QToolButton { border: none; background: transparent; paddin
 QWidget#SettingsPage QToolButton:hover { color: #26334f; }
 QPushButton#SidebarHelp { background: transparent; color: #b3bdd5; border: 1px solid #34405c; border-radius: 3px; padding: 6px; }
 QPushButton#SidebarHelp:hover { background: #222d4b; color: #ffffff; }
+QWidget#TodayPage, QWidget#TodayBody { background: transparent; }
+QLabel#TodayDate { color: #15294e; font-size: 27px; font-weight: 700; }
+QLabel#TodayMuted { color: #8592ac; font-size: 11px; }
+QFrame#TodayMetric, QFrame#TodayCard { background: #ffffff; border: 1px solid #edf1f8; border-radius: 14px; }
+QLabel#TodayMetricTitle, QLabel#TodaySectionTitle { color: #20385e; font-size: 13px; font-weight: 600; }
+QLabel#TodayMetricValue { color: #17305c; font-size: 24px; font-weight: 700; }
+QWidget#TodayPage QPushButton[primary="true"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #4e8aff,stop:1 #2864ed); border-color: #3976f4; }
+QWidget#TodayPage QPushButton[primary="true"]:hover { background: #3976f4; }
+QPushButton#TodayLink { color: #3979ff; border: none; background: transparent; padding: 2px 0px; font-size: 11px; }
+QPushButton#TodayLink:hover { color: #1e54c5; }
+QListWidget#TodayList { border: none; border-radius: 0px; background: transparent; }
+QListWidget#TodayList::item { padding: 0px; border: none; }
+QPushButton#FocusButton { background: #f1f6ff; color: #54729b; padding: 4px 12px; border: 1px solid #e3ebf8; border-radius: 9px; font-size: 11px; }
+QPushButton#TodayBackup { background: #f8faff; border: 1px solid #e7edf7; border-radius: 8px; padding: 9px 6px; font-size: 11px; min-height: 42px; text-align: left; }
+QPushButton#TodayBackup:hover { border-color: #93b4f8; background: #eff5ff; }
+QWidget#TodayPage QPushButton[quickColor="blue"] { background: #edf5ff; color: #3979ff; border-color: #edf5ff; padding: 7px 11px; }
+QWidget#TodayPage QPushButton[quickColor="purple"] { background: #f3eeff; color: #8057df; border-color: #f3eeff; padding: 7px 11px; }
+QWidget#TodayPage QPushButton[quickColor="green"] { background: #edf8f2; color: #25976a; border-color: #edf8f2; padding: 7px 11px; }
 """

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit
 
@@ -197,3 +197,49 @@ class WorkbenchUITests(unittest.TestCase):
         self.until(lambda: "兜底刷新任务" in page.tasks.item(0).text())
         self.assertEqual(len(self.store.tasks()), old_count)
         page.watcher.blockSignals(False)
+
+    def test_quick_add_and_mouse_checkbox_update_real_file_and_counts(self):
+        page = self.window.today_page
+        def fill(dialog):
+            dialog.title.setText("关键恢复检查")
+            dialog.priority.setCurrentText("高")
+            dialog.time.setText("10:00")
+            return QDialog.DialogCode.Accepted
+        with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
+            page.add_entry("今日任务")
+        self.until(lambda: len(page.report["tasks"]) == 2)
+        self.assertIn("[高] 关键恢复检查 @10:00", self.daily.load()["text"])
+        self.assertEqual(page.metrics[1].value.text(), "1 项")
+        self.assertIn("关键恢复检查", page.focus_items.item(0).text())
+        item = page.tasks.item(1)
+        rectangle = page.tasks.visualItemRect(item)
+        QTest.mouseClick(page.tasks.viewport(), Qt.MouseButton.LeftButton, pos=rectangle.topLeft() + QPoint(12, 20))
+        self.until(lambda: "[x] [高]" in self.daily.load()["text"] and page.tasks.isEnabled())
+        self.assertEqual(page.metrics[0].value.text(), "1 / 2")
+        self.assertEqual(page.metrics[1].value.text(), "0 项")
+        self.assertNotIn("关键恢复检查", page.focus_items.item(0).text())
+        self.assertNotIn("关键恢复检查", str(self.store.tasks()))
+
+    def test_focus_timer_is_manual_pauses_and_stops_on_window_close(self):
+        page = self.window.today_page
+        self.assertFalse(page.focus_timer.isActive())
+        with patch("agent_manager.ui.workbench.time.monotonic", return_value=100):
+            page.toggle_focus()
+        with patch("agent_manager.ui.workbench.time.monotonic", return_value=165):
+            page.toggle_focus()
+        self.assertEqual(page.focus_elapsed, 65)
+        self.assertIn("01:05", page.focus_button.text())
+        self.assertFalse(page.focus_timer.isActive())
+        page.toggle_focus()
+        self.window.close()
+        self.assertFalse(page.focus_timer.isActive())
+
+    def test_small_window_keeps_project_and_tasks_in_view_without_header_clipping(self):
+        page = self.window.today_page
+        self.window.resize(960, 700)
+        QTest.qWait(150)
+        self.assertEqual(page.columns_layout.getItemPosition(page.columns_layout.indexOf(page.columns[1]))[:2], (0, 1))
+        self.assertGreaterEqual(page.edit_button.width(), page.edit_button.minimumSizeHint().width())
+        self.assertGreaterEqual(page.focus_button.width(), page.focus_button.minimumSizeHint().width())
+        self.assertTrue(page.task_card.isVisible())
+        self.assertTrue(page.project_card.isVisible())

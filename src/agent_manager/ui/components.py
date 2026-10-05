@@ -131,11 +131,19 @@ PATHS = [
     '<path d="M12 3v12m-4-4 4 4 4-4M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
     '<path d="M4 4v16h16M8 14l4-5 4 3 4-7"/>',
     '<circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/>',
+    '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-13 4h2m4 0h2"/>',
+    '<rect x="5" y="5" width="14" height="17" rx="2"/><rect x="9" y="2" width="6" height="5" rx="1"/><path d="m8 14 3 3 5-6"/>',
+    '<path d="M13 2c2 5-2 6 1 9 2-1 3-3 3-3 6 8 1 14-5 14S2 17 5 11c1 2 2 3 3 3-2-6 5-6 5-12Z"/>',
+    '<path d="M18 8a6 6 0 0 0-12 0c0 8-3 7-3 10h18c0-3-3-2-3-10M10 22h4"/>',
+    '<path d="m12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6Z"/><path d="m7 12 3 3 7-7"/>',
+    '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
+    '<path d="m13 2-9 12h7l-1 8 10-13h-7Z"/>',
+    '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m12 12 9-9m-5 0h5v5"/>',
 ]
 
 
-def nav_icon(index: int) -> QIcon:
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="#818baf" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + PATHS[index] + '</g></svg>'
+def nav_icon(index: int, color: str = "#818baf") -> QIcon:
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + PATHS[index] + '</g></svg>'
     pixmap = QPixmap(24, 24)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)

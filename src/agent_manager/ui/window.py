@@ -976,8 +976,6 @@ class MainWindow(QMainWindow):
         self.dashboard_health = [(r, health_by_id[r.id]) for r in self.dashboard_resources]
         if hasattr(self, "today_page"):
             self.today_page.refresh_attention()
-            details = [r.name + "：" + (readable_time(h["created_at"]) if h.get("created_at") else "尚未备份") for r, h in self.dashboard_health if r.kind in {"hermes_local", "agent"}]
-            self.today_page.safety.setText(" · ".join(details[:3]) or "备份与恢复请进入数据安全。")
         # Process polling has its own timer; document reads must not trigger it.
 
     def refresh_agent_activity(self) -> None:
