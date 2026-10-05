@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import Qt, QSize, QRect, QEvent
+from PySide6.QtCore import Qt, QSize, QRect, QEvent, QDate
 from PySide6.QtGui import QColor, QFont, QPen
 from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QListWidget,
     QStyledItemDelegate, QStyle, QDialog, QFormLayout, QLineEdit, QComboBox,
-    QDialogButtonBox, QPushButton, QProgressBar, QSizePolicy)
+    QDialogButtonBox, QPushButton, QProgressBar, QSizePolicy, QDateEdit)
 
 from .components import nav_icon
 from ..workbench import task_details
@@ -46,7 +46,8 @@ class Metric(QFrame):
         layout.addWidget(tile)
         text = QVBoxLayout()
         text.setSpacing(3)
-        text.addWidget(label(title, "TodayMetricTitle"))
+        self.title = label(title, "TodayMetricTitle")
+        text.addWidget(self.title)
         self.value = label("0", "TodayMetricValue")
         text.addWidget(self.value)
         self.note = label(note, "TodayMuted")
@@ -209,12 +210,16 @@ class TodayDelegate(QStyledItemDelegate):
 
 
 class DailyEntryDialog(QDialog):
-    def __init__(self, parent, section):
+    def __init__(self, parent, section, day=None):
         super().__init__(parent)
         self.setWindowTitle("添加任务" if section == "今日任务" else "添加日程")
         self.resize(480, 230)
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        self.date = QDateEdit(QDate(day.year, day.month, day.day) if day else QDate.currentDate())
+        self.date.setCalendarPopup(True)
+        self.date.setDisplayFormat("yyyy-MM-dd")
+        form.addRow("哪一天", self.date)
         self.title = QLineEdit()
         self.title.setMaxLength(240)
         self.title.setPlaceholderText("例如：验证 Hermes 恢复")
@@ -227,7 +232,7 @@ class DailyEntryDialog(QDialog):
         self.time.setPlaceholderText("可选，例如 09:00" + ("–10:00" if section == "日程" else ""))
         form.addRow("时间", self.time)
         layout.addLayout(form)
-        layout.addWidget(label("保存到今日 Markdown，Obsidian 可以继续编辑。", "TodayMuted"))
+        layout.addWidget(label("保存到所选日期的 Markdown，与 Obsidian 共用。", "TodayMuted"))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("添加")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")

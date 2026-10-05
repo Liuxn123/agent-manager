@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher, QEvent, QUrl
+from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher, QEvent, QUrl, QDate
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextBrowser, QTextEdit, QSplitter, QListWidget, QListWidgetItem, QDialog,
     QDialogButtonBox, QFormLayout, QLineEdit, QComboBox, QCheckBox, QScrollArea, QMessageBox,
-    QGridLayout)
+    QGridLayout, QDateEdit)
 
 from ..domain import UserError
 from ..project_workspaces import ProjectWorkspace
@@ -139,6 +139,7 @@ class TodayPage(MarkdownPage):
         super().__init__(window)
         self.setObjectName("TodayPage")
         self.day, self.report, self.projects = date.today(), None, []
+        self.actual_today = self.day
         self.project_errors = []
         self.focus_elapsed, self.focus_started = 0.0, None
         self.narrow = None
@@ -149,11 +150,23 @@ class TodayPage(MarkdownPage):
         self.heading = label("", "TodayDate")
         self.heading.setWordWrap(True)
         top.addWidget(self.heading, 1)
+        self.agenda_button = control("日程总览", self.open_agenda)
+        top.addWidget(self.agenda_button)
         self.edit_button = control("编辑今日计划", self.edit_today, True)
         top.addWidget(self.edit_button)
         layout.addLayout(top)
         note = QHBoxLayout()
-        note.addWidget(label("先选一件事，再进入项目继续工作。", "TodayMuted"), 1)
+        note.addWidget(control("‹", lambda: self.set_day(self.day - timedelta(days=1))))
+        self.date_picker = QDateEdit(QDate.currentDate())
+        self.date_picker.setCalendarPopup(True)
+        self.date_picker.setDisplayFormat("yyyy-MM-dd")
+        self.date_picker.setToolTip("选择日期，查看或安排过去与未来的任务和日程。")
+        self.date_picker.dateChanged.connect(lambda value: self.set_day(value.toPython()))
+        note.addWidget(self.date_picker)
+        note.addWidget(control("›", lambda: self.set_day(self.day + timedelta(days=1))))
+        self.today_button = control("回到今天", lambda: self.set_day(date.today()))
+        note.addWidget(self.today_button)
+        note.addStretch()
         self.focus_button = control("开始专注", self.toggle_focus)
         self.focus_button.setToolTip("手动开始 / 暂停；只计本次打开的专注时间，不采集 Agent 使用时长。")
         self.focus_button.setObjectName("FocusButton")
@@ -294,41 +307,88 @@ class TodayPage(MarkdownPage):
         minutes, seconds = divmod(int(elapsed), 60)
         self.focus_button.setText(("暂停专注" if self.focus_started is not None else "开始专注") + (f" · {minutes:02d}:{seconds:02d}" if elapsed else ""))
 
-    def add_entry(self, section):
+    def add_entry(self, section, day=None, parent=None):
         if not self.report:
             return
         expected, daily = self.report["original"], self.daily()
-        dialog = DailyEntryDialog(self, section)
+        dialog = DailyEntryDialog(parent or self, section, day or self.day)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             title, priority, clock = dialog.values()
+            target_day = dialog.date.date().toPython()
+            target = Daily(daily.files.root, target_day)
+            def append(context):
+                snapshot = expected if target_day == daily.day else target.load()["original"]
+                context.checkpoint()
+                return target.add_entry(section, title, snapshot, priority, clock)
             self.window.submit(None, "添加" + ("任务" if section == "今日任务" else "日程"),
-                lambda context: daily.add_entry(section, title, expected, priority, clock), lambda _: self.refresh(), persist_result=False)
+                append, lambda _: self.set_day(target_day), persist_result=False)
+
+    def set_day(self, day):
+        if day != self.day:
+            self.day = day
+            self.report = None
+            self.tasks.setEnabled(False)
+            self.edit_button.setEnabled(False)
+            self.tasks.blockSignals(True)
+            self.tasks.clear()
+            self.tasks.blockSignals(False)
+            self.tasks.addItem("正在读取所选日期…")
+            self.focus_items.clear()
+            self.schedule.clear()
+        self.date_picker.blockSignals(True)
+        self.date_picker.setDate(QDate(day.year, day.month, day.day))
+        self.date_picker.blockSignals(False)
+        self.refresh()
+
+    def open_agenda(self):
+        from .agenda import AgendaPanel
+        dialog = QDialog(self)
+        dialog.setWindowTitle("日程总览 · 任务与安排")
+        dialog.resize(920, 620)
+        layout = QVBoxLayout(dialog)
+        panel = AgendaPanel(self.window, self, dialog)
+        layout.addWidget(panel)
+        layout.addWidget(control("关闭", dialog.accept))
+        panel.refresh()
+        try:
+            dialog.exec()
+        finally:
+            panel.stop_updates()
+            dialog.deleteLater()
 
     def daily(self):
         return Daily(work_root(self.window.store), self.day)
 
     def check_day(self):
-        if self.day != date.today():
-            self.day = date.today()
+        if self.actual_today != date.today():
+            following_today = self.day == self.actual_today
+            self.actual_today = date.today()
             self.focus_elapsed = 0.0
             if self.focus_started is not None:
                 self.focus_started = time.monotonic()
             self.update_focus()
-            self.refresh()
+            if following_today:
+                self.set_day(self.actual_today)
+            else:
+                self.refresh()
         elif self.isVisible() and self.report and not self.worker:
             # macOS may coalesce or miss notifications after an atomic editor save.
             # Check only today's small file, never rescan all projects on this timer.
             daily = Daily(self.notes_root, self.day)
             def changed(report):
-                if report["original"] != self.report["original"]:
+                if self.report and self.matches_day(report) and report["original"] != self.report["original"]:
                     self.render_daily(report)
             self.read_background(lambda context: daily.load(), changed)
 
     def refresh(self):
         if self.closed:
             return
-        self.day = date.today()
         self.heading.setText(self.day.strftime("%Y 年 %m 月 %d 日") + " · " + "星期" + "一二三四五六日"[self.day.weekday()])
+        is_today = self.day == date.today()
+        self.edit_button.setText("编辑今日计划" if is_today else "编辑当日计划")
+        self.today_button.setEnabled(not is_today)
+        self.focus_card.title.setText("今日重点" if is_today else "当日重点")
+        self.metrics[0].title.setText("今日任务" if is_today else "当日任务")
         notes_root = work_root(self.window.store)
         self.notes_root = notes_root
         daily, root = Daily(notes_root, self.day), self.window.store.setting("project_workspace", "")
@@ -357,11 +417,15 @@ class TodayPage(MarkdownPage):
         self.read_background(read, self.render)
 
     def render(self, report):
+        if not self.matches_day(report["daily"]):
+            return
         self.projects = report["projects"]
         self.render_daily(report["daily"])
         self.render_projects(report)
 
     def render_daily(self, report):
+        if not self.matches_day(report):
+            return
         self.report = report
         self.schedule.clear()
         for row in report["schedule"]:
@@ -384,13 +448,13 @@ class TodayPage(MarkdownPage):
             self.tasks.addItem(item)
         self.tasks.blockSignals(False)
         if not self.tasks.count():
-            item = QListWidgetItem("今天想完成什么？点“添加任务”开始。")
+            item = QListWidgetItem("这一天想完成什么？点“添加任务”开始。")
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.tasks.addItem(item)
         self.tasks.fit(6)
         count = len(report["tasks"])
         done = sum(row["done"] for row in report["tasks"])
-        self.task_card.title.setText(f"今日任务  ({done}/{count})")
+        self.task_card.title.setText(("今日任务" if self.day == date.today() else "当日任务") + f"  ({done}/{count})")
         self.daily_hint.setText("点复选框即保存 · 双击编辑 · 与 Obsidian 共用")
         self.focus_items.clear()
         outstanding = [row for row in report["tasks"] if not row["done"]]
@@ -402,7 +466,7 @@ class TodayPage(MarkdownPage):
             item.setToolTip(row["text"])
             self.focus_items.addItem(item)
         if not self.focus_items.count():
-            self.focus_items.addItem("今天的任务都已完成。" if count else "先添加一件今天最想完成的事。")
+            self.focus_items.addItem("这一天的任务都已完成。" if count else "先添加一件想完成的事，也可以安排到未来。")
         self.focus_items.fit(3)
         self.metrics[0].value.setText(f"{done} / {count}")
         self.metrics[0].progress.setValue(round(done * 100 / count) if count else 0)
@@ -411,6 +475,11 @@ class TodayPage(MarkdownPage):
         self.metrics[1].value.setText(str(high) + " 项")
         self.metrics[1].note.setText("需要优先完成" if high else "没有高优先级任务")
         self.edit_button.setEnabled(True)
+        if not self.window.jobs:
+            self.tasks.setEnabled(True)
+
+    def matches_day(self, report):
+        return report["day"] == self.day.isoformat() and Path(report["path"]) == self.daily().files.path(self.daily().relative)
 
     def render_projects(self, report):
         self.continue_projects.clear()
@@ -503,10 +572,10 @@ class TodayPage(MarkdownPage):
     def edit_today(self):
         if not self.report:
             return
-        text = edit_markdown(self, "今日计划 · 日程 / 任务 / 工作记录", self.report["text"])
+        daily, expected = self.daily(), self.report["original"]
+        text = edit_markdown(self, self.day.isoformat() + " · 日程 / 任务 / 工作记录", self.report["text"])
         if text is not None:
-            daily, expected = self.daily(), self.report["original"]
-            self.window.submit(None, "保存今日计划", lambda context: daily.save(text, expected), lambda _: self.refresh(), persist_result=False)
+            self.window.submit(None, "保存当日计划", lambda context: daily.save(text, expected), lambda _: self.refresh(), persist_result=False)
 
     def toggle_task(self, item):
         if not self.report or item.data(Qt.ItemDataRole.UserRole) is None:

@@ -4,12 +4,13 @@ import tempfile
 import time
 import threading
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, QDate
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit
+from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit, QVBoxLayout
 
 from agent_manager.domain import Resource
 from agent_manager.storage import Store
@@ -18,6 +19,7 @@ from agent_manager.project_workspaces import ProjectWorkspace
 from agent_manager.workbench import Daily, Catalog, work_root, project_context, summaries
 from agent_manager.ui.window import MainWindow
 from agent_manager.ui.workbench import CatalogDialog
+from agent_manager.ui.agenda import AgendaPanel
 
 
 class WorkbenchUITests(unittest.TestCase):
@@ -369,6 +371,125 @@ class WorkbenchUITests(unittest.TestCase):
         page.toggle_focus()
         self.window.close()
         self.assertFalse(page.focus_timer.isActive())
+
+    def test_future_entry_date_navigation_and_completion_preserve_today(self):
+        page = self.window.today_page
+        future = date.today() + timedelta(days=9)
+        original = self.daily.load()["text"]
+        def fill(dialog):
+            dialog.date.setDate(QDate(future.year, future.month, future.day))
+            dialog.title.setText("未来验证")
+            return QDialog.DialogCode.Accepted
+        with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
+            page.add_entry("今日任务")
+        self.until(lambda: page.report and page.report["day"] == future.isoformat())
+        self.assertEqual(self.daily.load()["text"], original)
+        self.assertIn("当日", page.task_card.title.text())
+        page.check_day()
+        self.until(lambda: not page.worker)
+        self.assertEqual(page.day, future)
+        page.tasks.item(0).setCheckState(Qt.CheckState.Checked)
+        planned = Daily(self.daily.files.root, future)
+        self.until(lambda: "[x] 未来验证" in planned.load()["text"] and page.tasks.isEnabled())
+        self.assertEqual(self.daily.load()["text"], original)
+        page.today_button.click()
+        self.until(lambda: page.report and page.report["day"] == date.today().isoformat())
+        self.assertIn("验证恢复", page.tasks.item(0).text())
+
+    def test_late_response_after_date_switch_is_ignored_and_future_browsing_creates_no_file(self):
+        page = self.window.today_page
+        stale = page.report
+        target = date.today() + timedelta(days=12)
+        page.set_day(target)
+        page.render_daily(stale)
+        self.assertIsNone(page.report)
+        self.assertFalse(page.tasks.isEnabled())
+        self.until(lambda: page.report and page.report["day"] == target.isoformat())
+        self.assertEqual(page.report["tasks"], [])
+        self.assertFalse(Path(page.report["path"]).exists())
+
+    def test_midnight_follows_today_but_keeps_deliberately_selected_date(self):
+        page = self.window.today_page
+        yesterday = date.today() - timedelta(days=1)
+        page.actual_today = yesterday
+        page.set_day(yesterday)
+        self.until(lambda: page.report and page.report["day"] == yesterday.isoformat())
+        page.check_day()
+        self.until(lambda: page.report and page.report["day"] == date.today().isoformat())
+        future = date.today() + timedelta(days=4)
+        page.set_day(future)
+        self.until(lambda: page.report and page.report["day"] == future.isoformat())
+        page.actual_today = yesterday
+        page.check_day()
+        self.until(lambda: not page.worker)
+        self.assertEqual(page.day, future)
+
+    def test_agenda_selected_date_add_preserves_existing_plan_and_invalid_range_blocks_open(self):
+        future = date.today() + timedelta(days=6)
+        planned = Daily(self.daily.files.root, future)
+        planned.add_entry("今日任务", "保留原计划", None)
+        dialog = QDialog(self.window)
+        layout = QVBoxLayout(dialog)
+        panel = AgendaPanel(self.window, self.window.today_page, dialog)
+        layout.addWidget(panel)
+        dialog.show()
+        panel.refresh()
+        try:
+            self.until(lambda: len(panel.rows) == 3)
+            row = next(i for i, entry in enumerate(panel.rows) if entry["day"] == future.isoformat())
+            panel.table.selectRow(row)
+            def fill(entry):
+                self.assertEqual(entry.date.date().toPython(), future)
+                entry.title.setText("追加未来日程")
+                entry.time.setText("16:00")
+                return QDialog.DialogCode.Accepted
+            with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
+                panel.add("日程")
+            self.until(lambda: any(entry["title"] == "16:00 追加未来日程" for entry in panel.rows))
+            self.assertIn("保留原计划", planned.load()["text"])
+            self.assertNotIn("追加未来日程", self.daily.load()["text"])
+            panel.mode.setCurrentIndex(3)
+            panel.start.setDate(QDate.currentDate().addDays(7))
+            panel.end.setDate(QDate.currentDate())
+            self.until(lambda: not panel.worker)
+            self.assertIn("开始日期", panel.status.text())
+            self.assertFalse(panel.table.isEnabled())
+            self.assertFalse(panel.open_button.isEnabled())
+        finally:
+            panel.stop_updates()
+            self.until(lambda: not panel.worker)
+            dialog.close()
+
+    def test_agenda_filters_and_external_edit_open_matching_date(self):
+        past = date.today() - timedelta(days=3)
+        future = date.today() + timedelta(days=5)
+        for day in (past, future):
+            Daily(self.daily.files.root, day).add_entry("今日任务", "跨日任务", None)
+        dialog = QDialog(self.window)
+        panel = AgendaPanel(self.window, self.window.today_page, dialog)
+        dialog.setLayout(QVBoxLayout())
+        dialog.layout().addWidget(panel)
+        dialog.show()
+        panel.refresh()
+        try:
+            self.until(lambda: len(panel.rows) == 3)
+            self.assertNotIn(past.isoformat(), [row["day"] for row in panel.rows])
+            panel.mode.setCurrentIndex(1)
+            self.until(lambda: len(panel.rows) == 3 and any(row["day"] == past.isoformat() for row in panel.rows))
+            self.assertTrue(all(row["kind"] == "任务" for row in panel.rows))
+            planned = Daily(self.daily.files.root, future)
+            report = planned.load()
+            planned.save(report["text"].replace("跨日任务", "Obsidian 改未来"), report["original"])
+            self.until(lambda: any(row["title"] == "Obsidian 改未来" for row in panel.rows))
+            row = next(i for i, entry in enumerate(panel.rows) if entry["day"] == future.isoformat())
+            panel.table.selectRow(row)
+            panel.open_button.click()
+            self.until(lambda: self.window.today_page.report and self.window.today_page.report["day"] == future.isoformat())
+            self.assertIn("Obsidian 改未来", self.window.today_page.tasks.item(0).text())
+        finally:
+            panel.stop_updates()
+            self.until(lambda: not panel.worker)
+            dialog.close()
 
     def test_small_window_keeps_project_and_tasks_in_view_without_header_clipping(self):
         page = self.window.today_page

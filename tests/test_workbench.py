@@ -11,7 +11,7 @@ from agent_manager.runtime import TaskContext
 from agent_manager.project_workspaces import ProjectWorkspace
 from agent_manager.workbench import (Daily, Catalog, MarkdownFiles, work_root, migrate_workbench,
     project_context, set_project_details, append_stage, summaries, stage_template, markdown_uri)
-from agent_manager.workbench import task_details
+from agent_manager.workbench import task_details, Agenda
 
 
 class WorkbenchTests(unittest.TestCase):
@@ -74,6 +74,55 @@ class WorkbenchTests(unittest.TestCase):
         oversized.write_bytes(b"x" * 1_000_001)
         with self.assertRaises(UserError):
             MarkdownFiles(self.root).read("large.md")
+
+    def test_agenda_reuses_old_markdown_and_includes_future_and_past_unfinished_tasks(self):
+        days = [date(2026, 10, 4), date(2026, 10, 5), date(2026, 11, 12)]
+        before = {}
+        for day in days:
+            daily = Daily(self.root, day)
+            daily.save(daily.template().replace("## 日程\n", "## 日程\n- 09:00 工作\n").replace("## 今日任务\n", "## 今日任务\n- 未完成\n- [x] 已完成\n"), None)
+            before[daily.relative] = Path(daily.load()["path"]).read_bytes()
+        agenda = Agenda(self.root)
+        self.assertEqual(len(agenda.scan()["items"]), 6)
+        unfinished = agenda.scan(tasks_only=True)["items"]
+        self.assertEqual([item["day"] for item in unfinished], [day.isoformat() for day in days])
+        self.assertEqual(len(agenda.scan(completed=True)["items"]), 9)
+        filtered = agenda.scan(days[1], days[1])["items"]
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(filtered[0]["kind"], "日程")
+        for relative, data in before.items():
+            self.assertEqual((self.root / relative).read_bytes(), data)
+        with self.assertRaises(UserError):
+            agenda.scan(days[2], days[0])
+
+    def test_agenda_empty_read_creates_nothing_and_refreshes_atomic_external_edits(self):
+        root = self.root / "not-created"
+        self.assertEqual(Agenda(root).scan()["items"], [])
+        self.assertFalse(root.exists())
+        daily = Daily(self.root)
+        daily.add_entry("今日任务", "原任务", None)
+        agenda = Agenda(self.root)
+        agenda.scan()
+        report = daily.load()
+        replacement = Path(report["path"]).with_suffix(".tmp")
+        replacement.write_text(report["text"].replace("原任务", "外部新任务"), encoding="utf-8")
+        replacement.replace(report["path"])
+        self.assertEqual(agenda.scan()["items"][0]["title"], "外部新任务")
+        (self.root / "每日/2026-99-99.md").write_text("invalid date", encoding="utf-8")
+        bad = self.root / "每日/2026-11-30.md"
+        bad.write_bytes(b"\xff")
+        report = agenda.scan()
+        self.assertEqual(len(report["items"]), 1)
+        self.assertIn("2026-11-30.md", report["errors"][0])
+
+    def test_agenda_does_not_follow_directory_links(self):
+        (self.root / "outside").mkdir()
+        try:
+            (self.root / "每日").symlink_to(self.root / "outside", target_is_directory=True)
+        except OSError:
+            self.skipTest("Symbolic link creation unavailable")
+        with self.assertRaises(UserError):
+            Agenda(self.root).scan()
 
     def test_library_frontmatter_unknown_fields_external_edits_and_duplicates(self):
         catalog = Catalog(self.root)

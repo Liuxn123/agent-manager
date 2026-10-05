@@ -155,7 +155,7 @@ class Daily:
             if match and section in {"日程", "今日任务"}:
                 entry = {"line": line, "text": match.group(2), "done": match.group(1) in {"x", "X"}}
                 (schedule if section == "日程" else tasks).append(entry)
-        return {"text": text, "original": original, "schedule": schedule, "tasks": tasks, "path": str(self.files.path(self.relative))}
+        return {"day": self.day.isoformat(), "text": text, "original": original, "schedule": schedule, "tasks": tasks, "path": str(self.files.path(self.relative))}
 
     def save(self, text, expected):
         return self.files.write(self.relative, text, expected)
@@ -197,6 +197,76 @@ class Daily:
             raise UserError("任务位置已改变，请刷新。")
         lines[line] = re.sub(r"^(\s*[-*] )(?:\[[ xX]\] )?", lambda m: m[1] + ("[x] " if done else "[ ] "), lines[line])
         return self.save("".join(lines), expected)
+
+
+class Agenda:
+    """Read-only cross-date index of the existing daily files; no migration or database body."""
+    def __init__(self, root):
+        self.files = MarkdownFiles(root)
+        self.cache = {}
+
+    def scan(self, start=None, end=None, *, tasks_only=False, completed=False, context=None):
+        if start and end and start > end:
+            raise UserError("开始日期不能晚于结束日期。")
+        directory = self.files.path("每日")
+        result = {"items": [], "errors": [], "watches": [str(directory)]}
+        if not directory.exists():
+            return result
+        candidates = []
+        for count, path in enumerate(directory.iterdir()):
+            if context:
+                context.checkpoint()
+            if count >= 5000:
+                result["errors"].append("每日目录超过 5000 项，请整理目录后再查看总览。")
+                break
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}\.md", path.name):
+                continue
+            try:
+                day = date.fromisoformat(path.stem)
+            except ValueError:
+                continue
+            if (start and day < start) or (end and day > end):
+                continue
+            candidates.append((day, path))
+        budget = 0
+        seen = set()
+        for count, (day, path) in enumerate(sorted(candidates)):
+            if context:
+                context.checkpoint()
+            if count >= 1000 or len(result["items"]) >= 4000:
+                result["errors"].append("总览达到显示上限，请缩小日期范围。")
+                break
+            try:
+                safe = self.files.path("每日/" + path.name)
+                stat = safe.stat()
+                budget += stat.st_size
+                if budget > 10_000_000:
+                    result["errors"].append("所选日期资料超过 10 MB，请缩小日期范围。")
+                    break
+                signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+                seen.add(path.name)
+                cached = self.cache.get(path.name)
+                if cached is None or cached[0] != signature:
+                    report = Daily(self.files.root, day).load()
+                    self.cache[path.name] = (signature, report)
+                else:
+                    report = cached[1]
+                result["watches"].append(report["path"])
+                sections = [("任务", report["tasks"])] if tasks_only else [("日程", report["schedule"]), ("任务", report["tasks"])]
+                for kind, rows in sections:
+                    for row in rows:
+                        if kind == "任务" and row["done"] and not completed:
+                            continue
+                        if len(result["items"]) >= 4000:
+                            result["errors"].append("总览达到显示上限，请缩小日期范围。")
+                            break
+                        details = task_details(row["text"]) if kind == "任务" else {"title": row["text"], "priority": "", "time": ""}
+                        result["items"].append({**row, **details, "day": day.isoformat(), "kind": kind, "path": report["path"]})
+            except (UserError, OSError) as exc:
+                self.cache.pop(path.name, None)
+                result["errors"].append(path.name + "：" + str(exc))
+        self.cache = {name: value for name, value in self.cache.items() if name in seen}
+        return result
 
 
 def task_details(text):

@@ -48,8 +48,8 @@ QPushButton[primary="true"] { background: #5368c5; border-color: #5368c5; color:
 QPushButton[primary="true"]:hover { background: #6479d5; }
 QPushButton[primary="true"]:disabled { background: #b2bce0; border-color: #b2bce0; }
 QPushButton[danger="true"] { color: #b85060; }
-QLineEdit, QComboBox, QSpinBox { background: #ffffff; border: 1px solid #dfe4ef; border-radius: 7px; padding: 8px; min-height: 20px; selection-background-color: #5368c5; }
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color: #7184d0; }
+QLineEdit, QComboBox, QSpinBox, QDateEdit { background: #ffffff; border: 1px solid #dfe4ef; border-radius: 7px; padding: 8px; min-height: 20px; selection-background-color: #5368c5; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #7184d0; }
 QComboBox QAbstractItemView { background: #ffffff; selection-background-color: #edf0fc; selection-color: #27334f; }
 QTableWidget { background: #ffffff; alternate-background-color: #fafbfe; border: 1px solid #e8ebf4; border-radius: 10px; gridline-color: #f0f2f7; selection-background-color: #eef1fe; selection-color: #34499a; outline: none; }
 QTableWidget::item { padding: 4px 8px; border: none; }
