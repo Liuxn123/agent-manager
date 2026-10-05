@@ -69,6 +69,11 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(page.schedule.item(0).text(), "09:00 开发")
         page.tasks.item(0).setCheckState(Qt.CheckState.Checked)
         self.until(lambda: "[x] 验证恢复" in self.daily.load()["text"] and page.tasks.isEnabled())
+        # Windows denies rename while Python's read handle is open. Finish our own
+        # observation before simulating the external editor's atomic replacement.
+        page.clock_timer.stop()
+        page.reload_timer.stop()
+        self.until(lambda: not page.worker)
         path = Path(self.daily.load()["path"])
         replacement = path.with_suffix(".tmp")
         replacement.write_text(self.daily.load()["text"].replace("验证恢复", "Obsidian 修改任务"), encoding="utf-8")
