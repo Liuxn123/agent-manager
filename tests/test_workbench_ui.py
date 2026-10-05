@@ -107,6 +107,33 @@ class WorkbenchUITests(unittest.TestCase):
         self.until(lambda: self.window.catalog_page.listing.count() == 1)
         self.assertEqual(self.window.catalog_page.selected()["name"], "阶段总结 Prompt")
 
+    def test_project_cards_source_toggle_menu_and_overview_share_original_files(self):
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        page = self.window.project_page
+        self.until(lambda: bool(page.status_text))
+        self.assertEqual(page.metrics[1].value.text(), "0 / 1")
+        self.assertIn("走通工作入口", page.overview.previews["goals"].toPlainText())
+        version = page.document_version
+        page.overview.toggle.click()
+        self.assertEqual(page.overview.stack.currentIndex(), 1)
+        self.assertIn("走通工作入口", page.views[0].toPlainText())
+        page.overview.toggle.click()
+        self.assertEqual(page.overview.stack.currentIndex(), 0)
+        self.assertEqual(page.document_version, version)
+        with patch("agent_manager.ui.projects.QDesktopServices.openUrl", return_value=True) as opened:
+            page.more_actions[page.open_button].trigger()
+            self.assertEqual(Path(opened.call_args[0][0].toLocalFile()), Path(self.project["directory"]))
+        status_path = Path(self.project["directory"]) / "agent/STATUS.md"
+        status_path.write_text(page.status_text.replace("走通工作入口", "外部修改目标"), encoding="utf-8")
+        self.until(lambda: "外部修改目标" in page.overview.previews["goals"].toPlainText())
+        self.assertIn("外部修改目标", page.views[0].toPlainText())
+        self.window.resize(960, 700)
+        QTest.qWait(150)
+        for control in (page.summary_button, page.log_button, page.more_button):
+            self.assertGreaterEqual(control.width(), control.minimumSizeHint().width())
+            self.assertTrue(page.hero.rect().contains(control.geometry().bottomRight()))
+        self.assertFalse(page.hero.geometry().intersects(page.metrics_row.geometry()))
+
     def test_library_create_search_favorite_and_external_edit_do_not_store_body_in_sqlite(self):
         self.window.navigation.setCurrentRow(self.window.LIBRARY)
         page = self.window.catalog_page

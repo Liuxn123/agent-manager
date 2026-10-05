@@ -226,9 +226,11 @@ class UITests(unittest.TestCase):
         self.assertFalse(any(marker in t["result"] + t["log"] for t in self.store.tasks()))
         self.window.resize(960, 660)
         self.app.processEvents()
-        for control in (page.open_button, page.obsidian_button, page.move_button, page.new_note_button):
+        for control in (page.more_button, page.obsidian_button, page.new_note_button):
             self.assertTrue(control.isVisible())
             self.assertGreater(control.width(), 65)
+        for control in (page.open_button, page.move_button):
+            self.assertTrue(page.more_actions[control].isEnabled())
 
     def test_obsidian_archived_notes_are_visible_without_create_or_inline_edit(self):
         from agent_manager.project_workspaces import ProjectWorkspace

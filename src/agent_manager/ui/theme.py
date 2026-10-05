@@ -105,4 +105,13 @@ QPushButton#TodayBackup:hover { border-color: #93b4f8; background: #eff5ff; }
 QWidget#TodayPage QPushButton[quickColor="blue"] { background: #edf5ff; color: #3979ff; border-color: #edf5ff; padding: 7px 11px; }
 QWidget#TodayPage QPushButton[quickColor="purple"] { background: #f3eeff; color: #8057df; border-color: #f3eeff; padding: 7px 11px; }
 QWidget#TodayPage QPushButton[quickColor="green"] { background: #edf8f2; color: #25976a; border-color: #edf8f2; padding: 7px 11px; }
+QWidget#ProjectPage QPushButton[primary="true"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #4e8aff,stop:1 #2864ed); border-color: #3976f4; }
+QTableWidget#ProjectCards { border: none; background: transparent; }
+QWidget#ProjectDetail { background: #f5f6fb; }
+QTableWidget#ProjectCards::item { padding: 0px; background: transparent; }
+QLabel#ProjectName { color: #142b52; font-size: 24px; font-weight: 700; }
+QLabel#ProjectIcon { background: #3979ff; border-radius: 12px; }
+QLabel#ProjectNext { color: #345a92; font-size: 13px; }
+QLabel#ProjectMetricValue { color: #17305c; font-size: 18px; font-weight: 700; }
+QTextBrowser#ProjectPreview { border: none; background: transparent; padding: 2px; color: #405575; }
 """
