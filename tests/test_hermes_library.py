@@ -28,9 +28,6 @@ class HermesLibraryTests(unittest.TestCase):
                            [("visible", "user", f"message-{i}", 1) for i in range(25)] +
                            [("visible", "system", "private-system-prompt", 1), ("visible", "tool", "private-tool-output", 1),
                             ("visible", "assistant", "discarded-content", 0), ("visible", "assistant", "password=fixture-secret\n" + "a" * 3000, 1)])
-        skill = self.home / "skills" / "planning" / "SKILL.md"
-        skill.parent.mkdir(parents=True)
-        skill.write_text("# 工作规划\npassword=fixture-secret\n", encoding="utf-8")
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -39,13 +36,12 @@ class HermesLibraryTests(unittest.TestCase):
         before = hashlib.sha256((self.home / "state.db").read_bytes()).hexdigest()
         report = list_library(self.resource, self.context)
         self.assertEqual([row["id"] for row in report["sessions"]], ["visible"])
-        self.assertEqual(report["skills"][0]["relative"], "planning/SKILL.md")
+        self.assertIn("最多列 100 个近期会话", report["note"])
         text = read_item(self.resource, "session", "visible", self.context)["text"]
         for absent in ("message-0\n", "message-5\n", "private-system-prompt", "private-tool-output", "discarded-content", "fixture-secret"):
             self.assertNotIn(absent, text)
         self.assertIn("message-6", text)
         self.assertLess(text.count("a"), 2500)
-        self.assertNotIn("fixture-secret", read_item(self.resource, "skill", "planning/SKILL.md", self.context)["text"])
         self.assertEqual(before, hashlib.sha256((self.home / "state.db").read_bytes()).hexdigest())
 
     def test_hidden_sessions_and_path_traversal_cannot_be_read(self):

@@ -22,8 +22,8 @@ class GuideDialog(QDialog):
         self.sections = QListWidget()
         self.sections.setFixedWidth(185)
         self.sections.addItems([
-            "先看这里", "工作台", "本地 Hermes", "服务器 Hermes", "本地项目",
-            "其他 Agent", "备份与迁移", "工作总结", "设置", "U 盘与换电脑", "常见问题", "技能与工具",
+            "先看这里", "今日", "项目", "阶段总结", "Agent",
+            "资源库", "数据安全", "Obsidian 联动", "设置", "U 盘与换电脑", "常见问题",
         ])
         content.addWidget(self.sections)
         self.viewer = QTextBrowser()

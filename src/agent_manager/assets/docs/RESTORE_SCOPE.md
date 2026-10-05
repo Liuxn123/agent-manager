@@ -7,7 +7,7 @@
 • 登记的 Agent 本地记录与配置文件，包括聊天 JSON/JSONL 和 SQLite 数据库的已提交数据。
 • 多个来源目录，可在新电脑分别选择项目和记录子目录。
 • 恢复完成后在管家重新登记这些新路径，原登记保留。
-• 技能与工具中的自有资料库先点“备份通用库”，其 Skills、脚本和提示词就随 .amb 携带。完整便携目录也包含 data/asset-library。
+• 已有的 `data/asset-library` 文件留在便携目录中；技能管理已交由 Skills Manager，管家不再提供通用技能库入口。
 
 需要你在原应用完成：
 • 安装 Hermes、Codex、WorkBuddy、Obsidian 等原应用及其运行环境。

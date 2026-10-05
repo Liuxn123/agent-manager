@@ -10,9 +10,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton, QDialog, QComboBox
+from PySide6.QtWidgets import QApplication, QPushButton, QDialog
 
-from agent_manager import archives, asset_library
+from agent_manager import archives
 from agent_manager.domain import Resource
 from agent_manager.runtime import TaskContext
 from agent_manager.storage import Store
@@ -49,7 +49,7 @@ class ManagementUITests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_simplified_settings_change_destination_without_moving_existing_backup(self):
-        self.window.navigation.setCurrentRow(8)
+        self.window.navigation.setCurrentRow(self.window.SETTINGS)
         self.app.processEvents()
         self.assertFalse(self.window.settings_advanced.isVisible())
         self.assertFalse(self.window.backup_keep.isVisible())
@@ -73,73 +73,11 @@ class ManagementUITests(unittest.TestCase):
         self.store.start_task("fixturefailed", resource.id, "恢复预览")
         self.store.finish_task("fixturefailed", "failed", {"error": "fixture failure"})
         self.window.refresh_resources()
-        self.assertIn("最近操作未完成", self.window.pending_items.item(0).text())
+        self.assertIn("最近操作失败或中断", self.window.pending_items.item(0).toolTip())
         self.window.open_dashboard_item(self.window.pending_items.item(0))
-        self.assertEqual(self.window.navigation.currentRow(), 7)
+        self.assertEqual(self.window.navigation.currentRow(), self.window.SAFETY)
         self.assertEqual(self.window.task_rows[0]["resource_id"], resource.id)
         self.assertNotIn("搜索本地记录", [button.text() for button in self.window.stack.widget(0).findChildren(QPushButton)])
-
-    def test_asset_module_reads_inventory_without_persisting_prompt_text(self):
-        asset_library.save_prompt(self.store, "通用测试", "fixture-private-template-text")
-        self.window.navigation.setCurrentRow(5)
-        page = self.window.asset_page
-        with patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
-            self.wait_jobs()
-            page.categories.setCurrentIndex(2)
-            page.table.selectRow(0)
-            self.wait_jobs()
-            self.assertFalse(warnings.called)
-        self.assertIn("fixture-private-template-text", page.preview.toPlainText())
-        self.assertNotIn("fixture-private-template-text", str(self.store.tasks()))
-        self.assertTrue(page.edit_button.isEnabled())
-
-    def test_asset_gui_import_deploy_and_encrypted_library_restore(self):
-        source = self.root / "source/交接技能"
-        source.mkdir(parents=True)
-        (source / "SKILL.md").write_text("# 交接要求\nfixture-skill", encoding="utf-8")
-        (source / "script.py").write_text("raise RuntimeError('must-not-execute')", encoding="utf-8")
-        agent = self.root / "target-agent"
-        agent.mkdir()
-        self.store.save_resource(Resource("接收技能的 Agent", "agent", {"path": str(agent), "engine": "其他 Agent"}))
-        self.window.navigation.setCurrentRow(5)
-        self.wait_jobs()
-        page = self.window.asset_page
-        with patch("agent_manager.ui.assets.QFileDialog.getExistingDirectory", return_value=str(source)), \
-             patch("agent_manager.ui.assets.QMessageBox.information"), patch("agent_manager.ui.assets.QMessageBox.warning") as warnings:
-            page.import_skill()
-            self.wait_jobs()
-            self.assertFalse(warnings.called)
-        library = asset_library.library_root(self.store)
-        self.assertEqual((library / "skills/交接技能/script.py").read_bytes(), (source / "script.py").read_bytes())
-        page.table.selectRow(0)
-        self.wait_jobs()
-        def select_target(dialog):
-            choices = dialog.findChild(QComboBox)
-            self.assertEqual(Path(choices.currentData()), agent / "skills")
-            return QDialog.DialogCode.Accepted
-        with patch.object(QDialog, "exec", select_target), patch("agent_manager.ui.assets.QMessageBox.information"), \
-             patch("agent_manager.ui.assets.QMessageBox.warning") as warnings:
-            page.deploy_skill()
-            self.wait_jobs()
-            self.assertFalse(warnings.called)
-        self.assertEqual((agent / "skills/交接技能/SKILL.md").read_bytes(), (source / "SKILL.md").read_bytes())
-        asset_library.save_prompt(self.store, "交接提示", "fixture-template")
-        password = "fixture-library-password"
-        with patch.object(self.window, "password_input", return_value=(password, False)), \
-             patch("agent_manager.ui.window.QMessageBox.information"), patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
-            page.backup_library()
-            self.wait_jobs()
-            self.assertFalse(warnings.called, str(self.store.tasks()))
-        resource = next(item for item in self.store.resources() if item.id == "agentassetslibrary")
-        package = archives.list_archives(self.window.service.backup_root(), resource.id)[0]
-        self.window.open_dashboard_item(self.window.latest_backups.item(0))
-        self.assertEqual(self.window.navigation.currentRow(), 6)
-        self.assertEqual(self.window.backup_rows[self.window.backup_table.currentRow()][0].id, resource.id)
-        target = self.root / "restored-library"
-        plan = archives.plan_restore(resource, Path(package["archive"]), target, password, TaskContext())
-        archives.apply_restore(plan, password, TaskContext())
-        self.assertEqual((target / "prompts/交接提示.md").read_text(encoding="utf-8"), "fixture-template")
-        self.assertEqual((target / "skills/交接技能/script.py").read_bytes(), (source / "script.py").read_bytes())
 
     def test_new_computer_restore_gui_pipeline_restores_files_database_and_registration(self):
         project, records = self.root / "source-project", self.root / "source-records"

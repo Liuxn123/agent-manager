@@ -87,7 +87,7 @@ def main():
             raise
         release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
             'draft': False, 'prerelease': True,
-            'body': 'Hermes 改为顶部实例 / Profile 选择，常用操作直接展示；服务器两个 Profile 明确共用网关和现有整套备份。项目与 Obsidian 合并，保留 myself 备份入口，日志按日期查看并分项填写。\n\nAgent / myself 新建加密备份共用本次打开的密码，关闭后忘记。修复 Codex 运行锁、受保护沙箱与静止 SQLite 只读备份；实际本机 5869 文件已完成隔离加密、校验、恢复。\n\n换电脑显示逐项任务清单，新增工作总结、手动限量的 Codex Token 用量统计，更新离线分模块说明。原应用安装、登录和续聊仍需在原客户端验证。\n\nWindows、Linux、macOS Apple Silicon 和 Intel 完成自动测试及便携包解压启动与移动验证。升级保留 data、backups、restored。'})
+            'body': (root / 'docs/RELEASE_NOTES.md').read_text(encoding='utf-8')})
     base = release['upload_url'].split('{')[0]
     assert urllib.parse.urlparse(base).hostname == 'uploads.github.com'
     existing = {asset['name']: asset for asset in release['assets']}

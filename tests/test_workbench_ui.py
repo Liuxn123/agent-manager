@@ -1,0 +1,188 @@
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+import tempfile
+import time
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit
+
+from agent_manager.domain import Resource
+from agent_manager.storage import Store
+from agent_manager.runtime import TaskContext
+from agent_manager.project_workspaces import ProjectWorkspace
+from agent_manager.workbench import Daily, Catalog, work_root, project_context, summaries
+from agent_manager.ui.window import MainWindow
+from agent_manager.ui.workbench import CatalogDialog
+
+
+class WorkbenchUITests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.workspace = ProjectWorkspace(self.root / "workspace")
+        self.workspace.initialize(TaskContext())
+        self.project = self.workspace.create("每日工作", "走通工作入口", True, TaskContext())
+        (self.workspace.root / "myself/.obsidian").mkdir()
+        self.store = Store(self.root / "data")
+        self.store.set_setting("project_workspace", str(self.workspace.root))
+        self.agent = Resource("我的 Codex", "agent", {"engine": "Codex", "record_paths": [str(self.root)], "portable_bundle": True})
+        self.store.save_resource(self.agent)
+        self.daily = Daily(work_root(self.store))
+        self.daily.save(self.daily.template().replace("## 日程\n", "## 日程\n- 09:00 开发\n").replace("## 今日任务\n", "## 今日任务\n- [ ] 验证恢复\n"), None)
+        Catalog(work_root(self.store)).save({"name": "阶段总结 Prompt", "type": "prompt", "projects": [self.project["project_id"]], "agents": [self.agent.id], "tags": ["总结"]}, "人工可编辑正文")
+        self.window = MainWindow(self.store)
+        self.window.show()
+        self.until(lambda: self.window.today_page.report is not None)
+
+    def until(self, predicate):
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            if predicate() and not self.window.jobs:
+                return
+            QTest.qWait(15)
+            time.sleep(.003)
+        self.fail("UI operation timed out: " + str([(t["title"], t["state"], t["result"]) for t in self.store.tasks()[:5]]))
+
+    def tearDown(self):
+        self.until(lambda: not self.window.jobs and not self.window.today_page.worker and not self.window.catalog_page.worker and not self.window.agent_status_worker)
+        self.window.close()
+        self.window.pool.waitForDone(5000)
+        self.app.processEvents()
+        self.temp.cleanup()
+
+    def test_daily_is_default_and_checkbox_and_obsidian_edit_share_original_file(self):
+        self.assertEqual([self.window.navigation.item(i).text() for i in range(6)], ["今日", "项目", "Agent", "资源库", "数据安全", "设置"])
+        self.assertIs(self.window.stack.currentWidget(), self.window.today_page)
+        page = self.window.today_page
+        self.assertEqual(page.schedule.item(0).text(), "09:00 开发")
+        page.tasks.item(0).setCheckState(Qt.CheckState.Checked)
+        self.until(lambda: "[x] 验证恢复" in self.daily.load()["text"] and page.tasks.isEnabled())
+        path = Path(self.daily.load()["path"])
+        replacement = path.with_suffix(".tmp")
+        replacement.write_text(self.daily.load()["text"].replace("验证恢复", "Obsidian 修改任务"), encoding="utf-8")
+        replacement.replace(path)
+        self.until(lambda: "Obsidian 修改任务" in page.tasks.item(0).text())
+        with patch("agent_manager.ui.workbench.QDesktopServices.openUrl", return_value=True) as opened:
+            page.open_daily()
+            self.assertIn("obsidian://open?", opened.call_args[0][0].toString())
+        self.assertNotIn("Obsidian 修改任务", str(self.store.tasks()))
+
+    def test_today_to_project_stage_summary_and_related_library(self):
+        page = self.window.today_page
+        page.open_project(page.continue_projects.item(0))
+        project_page = self.window.project_page
+        self.until(lambda: bool(project_page.status_text))
+        self.assertEqual(self.window.navigation.currentRow(), self.window.PROJECT)
+        self.assertIn("规划", project_page.stage_label.text())
+        self.assertIn("阶段总结 Prompt", project_page.related_list.item(0).text())
+        def choose(dialog):
+            dialog.findChild(QComboBox).setCurrentText("验证新阶段")
+            listing = dialog.findChildren(QListWidget)[0]
+            listing.item(0).setCheckState(Qt.CheckState.Checked)
+            return QDialog.DialogCode.Accepted
+        with patch("agent_manager.ui.projects.QDialog.exec", choose):
+            project_page.edit_stage()
+        self.until(lambda: "验证新阶段" in project_page.stage_label.text())
+        details = project_context(self.workspace.document(self.project["project_id"], "agent/STATUS.md")["text"])
+        self.assertEqual(details["agents"], [self.agent.id])
+        def write(dialog):
+            editor = dialog.findChild(QTextEdit)
+            editor.setPlainText(editor.toPlainText() + "\n完成内容：已验证 GUI 链路。")
+            return QDialog.DialogCode.Accepted
+        with patch("agent_manager.ui.projects.QDialog.exec", write):
+            project_page.write_stage_summary()
+        self.until(lambda: "已验证 GUI 链路" in project_page.summary_view.toPlainText())
+        self.assertEqual(len(summaries(self.workspace.document(self.project["project_id"], "agent/HANDOFF.md")["text"])), 1)
+        project_page.show_project_resources()
+        self.until(lambda: self.window.catalog_page.listing.count() == 1)
+        self.assertEqual(self.window.catalog_page.selected()["name"], "阶段总结 Prompt")
+
+    def test_library_create_search_favorite_and_external_edit_do_not_store_body_in_sqlite(self):
+        self.window.navigation.setCurrentRow(self.window.LIBRARY)
+        page = self.window.catalog_page
+        self.until(lambda: len(page.items) == 1)
+        def fill(dialog):
+            dialog.fields["name"].setText("GitHub MCP 说明")
+            dialog.kind.setCurrentIndex(dialog.kind.findData("mcp"))
+            dialog.flags["tested"].setChecked(True)
+            dialog.body.setPlainText("fixture-private-resource-body\n\n## 安装说明\n人工配置")
+            return QDialog.DialogCode.Accepted
+        with patch.object(CatalogDialog, "exec", fill):
+            page.edit_item(None)
+        self.until(lambda: len(page.items) == 2)
+        page.search.setText("人工配置")
+        self.assertEqual(page.listing.count(), 1)
+        self.assertEqual(page.selected()["type"], "mcp")
+        page.toggle_favorite()
+        self.until(lambda: page.selected()["metadata"].get("favorite"))
+        item = page.selected()
+        Path(item["path"]).write_text(item["text"].replace("人工配置", "外部新配置"), encoding="utf-8")
+        page.search.clear()
+        self.until(lambda: any("外部新配置" in i["body"] for i in page.items))
+        self.assertNotIn("fixture-private-resource-body", str(self.store.tasks()))
+        self.assertNotIn(b"fixture-private-resource-body", self.store.path.read_bytes())
+
+    def test_existing_agent_opens_same_safety_registration_and_daily_has_no_backup_controls(self):
+        self.window.navigation.setCurrentRow(self.window.AGENT)
+        self.window.agent_page.refresh(self.agent.id)
+        self.window.agent_page.safety()
+        self.assertEqual(self.window.navigation.currentRow(), self.window.SAFETY)
+        self.assertEqual(self.window.resource_pages[3].selected().id, self.agent.id)
+        self.assertEqual(self.window.safety_tabs.currentIndex(), 0)
+        self.assertFalse(self.window.timer.isActive())
+
+    def test_change_notes_location_keeps_old_files_and_engine_resource_filter_and_url_guard(self):
+        old = Path(self.daily.load()["path"])
+        before = old.read_bytes()
+        destination = self.root / "portable-notes"
+        destination.mkdir()
+        with patch("agent_manager.ui.window.QFileDialog.getExistingDirectory", return_value=str(destination)):
+            self.window.change_workbench_location()
+        self.until(lambda: not self.window.today_page.worker and not self.window.catalog_page.worker)
+        self.assertEqual(work_root(self.store).resolve(), destination.resolve())
+        self.assertEqual(old.read_bytes(), before)
+        Catalog(destination).save({"name": "适用 Codex", "type": "skill", "agents": ["codex"]}, "说明")
+        self.window.catalog_page.agent_filter = self.agent.id
+        self.window.navigation.setCurrentRow(self.window.LIBRARY)
+        self.until(lambda: self.window.catalog_page.listing.count() == 1)
+        from PySide6.QtCore import QUrl
+        with patch("agent_manager.ui.workbench.QDesktopServices.openUrl") as opened, patch("agent_manager.ui.workbench.QMessageBox.information"):
+            self.window.catalog_page.safe_url(QUrl("file:///C:/not-a-website.exe"))
+            opened.assert_not_called()
+
+    def test_closing_window_during_daily_read_does_not_reopen_sqlite(self):
+        gate, entered = threading.Event(), threading.Event()
+        original = Daily.load
+        def delayed(daily):
+            entered.set()
+            gate.wait(3)
+            return original(daily)
+        self.until(lambda: not self.window.today_page.worker)
+        with patch.object(Daily, "load", delayed):
+            self.window.today_page.refresh()
+            self.until(entered.is_set)
+            self.window.close()
+            with patch.object(self.store, "setting", side_effect=AssertionError("Closed daily read must not open SQLite")) as reopened:
+                gate.set()
+                self.until(lambda: not self.window.today_page.worker)
+                reopened.assert_not_called()
+
+    def test_manual_agent_without_directory_does_not_open_current_working_folder(self):
+        manual = Resource("未配置的新 Agent", "agent", {})
+        self.store.save_resource(manual)
+        self.window.agent_page.refresh(manual.id)
+        with patch.object(self.window, "open_path") as opened, patch("agent_manager.ui.workbench.QMessageBox.information"):
+            self.window.agent_page.open_agent()
+            self.window.agent_page.directory()
+            opened.assert_not_called()
+        self.assertEqual(len(self.store.resources()), 2)

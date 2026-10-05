@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import archives
@@ -76,18 +76,3 @@ def retention_candidates(root: Path, resource_id: str, keep: int, protected: str
         if source.resolve().parent == root.resolve() and source.name != Path(protected).name and not source.is_symlink() and source.stem.isalnum():
             result.append(source)
     return result
-
-
-def activity_summary(tasks: list[dict]) -> dict:
-    current = datetime.now().astimezone()
-    today = current.date()
-    successful = failed = 0
-    trend = []
-    for offset in range(6, -1, -1):
-        date = today - timedelta(days=offset)
-        count = sum(datetime.fromisoformat(t["started_at"]).astimezone().date() == date and t["state"] == "success" for t in tasks)
-        trend.append((date.strftime("%m/%d"), count))
-        if date == today:
-            successful = count
-            failed = sum(datetime.fromisoformat(t["started_at"]).astimezone().date() == today and t["state"] in {"failed", "interrupted"} for t in tasks)
-    return {"successful": successful, "failed": failed, "trend": trend, "running": sum(t["state"] == "running" for t in tasks)}

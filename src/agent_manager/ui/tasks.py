@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from ..domain import Cancelled, Operation, RestorePlan, UserError
@@ -10,6 +12,27 @@ from ..storage import Store
 
 class TaskSignals(QObject):
     finished = Signal(str, object, str)
+
+
+class ReadSignals(QObject):
+    finished = Signal(object)
+
+
+class ReadWorker(QRunnable):
+    """A single background observation, without changing task history."""
+    def __init__(self, operation):
+        super().__init__()
+        self.operation = operation
+        self.cancel = threading.Event()
+        self.signals = ReadSignals()
+
+    @Slot()
+    def run(self):
+        try:
+            outcome = self.operation(self.cancel)
+        except Exception:
+            outcome = None
+        self.signals.finished.emit(outcome)
 
 
 class Worker(QRunnable):

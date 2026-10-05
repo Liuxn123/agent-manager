@@ -50,7 +50,7 @@ class UITests(unittest.TestCase):
         from PySide6.QtGui import QRawFont
         self.assertTrue(QRawFont.fromFont(self.app.font()).supportsCharacter(ord("恢")))
         self.window.resize(960, 660)
-        for index in range(9):
+        for index in range(6):
             self.window.navigation.setCurrentRow(index)
             self.app.processEvents()
             self.assertEqual(self.window.stack.currentIndex(), index)
@@ -67,7 +67,7 @@ class UITests(unittest.TestCase):
         resource = Resource("Test project", "project", {"path": str(self.root)})
         self.store.save_resource(resource)
         self.window.refresh_resources()
-        self.window.navigation.setCurrentRow(3)
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
         page = self.window.resource_pages[2]
         self.assertTrue(page.observe_button.isEnabled())
 
@@ -99,7 +99,7 @@ class UITests(unittest.TestCase):
         resource = Resource("本机 Hermes · " + "需要完整显示的资源名称" * 4, "hermes_local", {"home": location})
         self.store.save_resource(resource)
         self.window.refresh_resources()
-        self.window.navigation.setCurrentRow(1)
+        self.window.open_safety_resource(resource)
         page = self.window.resource_pages[0]
         for width in (960, 1280):
             self.window.resize(width, 700)
@@ -144,7 +144,7 @@ class UITests(unittest.TestCase):
         report = self.window.service.action(resource, "library", TaskContext())
         dialog = HermesLibraryDialog(self.window, resource, report)
         dialog.show()
-        dialog.tables["session"].selectRow(0)
+        dialog.table.selectRow(0)
         with patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
             deadline = time.monotonic() + 10
             while "fixture-private-Hermes-message" not in dialog.preview.toPlainText() and time.monotonic() < deadline:
@@ -159,7 +159,7 @@ class UITests(unittest.TestCase):
         repository = self.root / "agent-backups"
         self.store.set_setting("agent_backup_repository", str(repository))
         self.window.refresh_agent_repository()
-        self.window.navigation.setCurrentRow(6)
+        self.window.open_backup_history()
         self.window.resize(960, 660)
         self.app.processEvents()
         self.assertIn(str(repository), self.window.agent_repository_label.text())
@@ -192,7 +192,7 @@ class UITests(unittest.TestCase):
         (workspace.root / "myself/.obsidian").mkdir()
         note = workspace.create_note(project["project_id"], "实验笔记", TaskContext())
         self.store.set_setting("project_workspace", str(workspace.root))
-        self.window.navigation.setCurrentRow(3)
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
         page = self.window.project_page
         page.refresh()
 
@@ -239,7 +239,7 @@ class UITests(unittest.TestCase):
         workspace.create_note(project["project_id"], "保留笔记", TaskContext())
         workspace.move(workspace.plan_move(project["project_id"], False, TaskContext()), "归档", TaskContext())
         self.store.set_setting("project_workspace", str(workspace.root))
-        self.window.navigation.setCurrentRow(3)
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
         page = self.window.project_page
         page.filter.setCurrentIndex(1)
         page.refresh()

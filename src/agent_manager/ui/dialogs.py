@@ -126,6 +126,18 @@ class ResourceDialog(QDialog):
                 self.form.addRow(advanced)
                 self.resize(760, 680)
             note = ("选项目文件夹，保存代码与成果；再添加本地记录目录，保存聊天、配置和附件。备份前退出对应 Agent。" + RECORD_NOTE) if kind == "agent" else "代码、笔记、附件及未提交文件会一起加密备份。换电脑时恢复到新文件夹。"
+        if kind in {"agent", "hermes_local", "hermes_server"}:
+            details = QGroupBox("日常入口与关联（可选）")
+            details.setCheckable(True)
+            details.setChecked(False)
+            detail_form = QFormLayout(details)
+            saved_form, self.form = self.form, detail_form
+            self.add_field("install_path", "安装 / 运行位置", options.get("install_path", ""), "dir" if kind != "hermes_server" else "")
+            self.add_field("config_dir", "配置目录", options.get("config_dir", ""), "dir" if kind != "hermes_server" else "")
+            self.add_field("entry_url", "常用网页入口", options.get("entry_url", ""))
+            self.add_field("project_ids", "关联项目编号（逗号分隔）", ", ".join(options.get("project_ids", [])))
+            self.form = saved_form
+            self.form.addRow(details)
         hint = QLabel(note)
         hint.setWordWrap(True)
         hint.setObjectName("Subtitle")
@@ -169,6 +181,8 @@ class ResourceDialog(QDialog):
             if not name:
                 raise UserError("请输入资源名称。")
             options = {**(self.original.options if self.original else {}), **values}
+            if "project_ids" in values:
+                options["project_ids"] = [v.strip() for v in values["project_ids"].replace("，", ",").split(",") if v.strip()]
             if self.kind != "hermes_server":
                 options["automatic_backup"] = self.automatic.isChecked()
                 options.setdefault("backup_interval_hours", 24)
@@ -199,8 +213,7 @@ class ResourceDialog(QDialog):
                     options["engine"] = self.engine.currentText()
                     options["record_paths"] = [self.record_paths.item(index).text() for index in range(self.record_paths.count())]
                     options["portable_bundle"] = True
-                    if not options["path"] and not options["record_paths"]:
-                        raise UserError("请选择项目文件夹，或添加一个本地记录目录。")
+                    # Manual registrations may be incomplete; backup validates its actual sources.
                     arguments = json.loads(values["arguments"])
                     if not isinstance(arguments, list) or not all(isinstance(item, str) for item in arguments):
                         raise UserError("启动参数需要字符串 JSON 数组，例如 [\"-m\", \"my_agent\"]。")

@@ -8,7 +8,7 @@ class MigrationChecklist(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        label = QLabel("换电脑任务清单 · 点击“开始换电脑检查”，按提示补充文件、密码和位置")
+        label = QLabel("换电脑任务清单 · 在上方填写备份文件路径和本次口令，解锁后再输入恢复目标")
         label.setWordWrap(True)
         label.setObjectName("SectionTitle")
         layout.addWidget(label)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 import threading
 
@@ -9,10 +8,22 @@ from ..domain import Resource, UserError
 from ..runtime import TaskContext
 from .local import required_directory
 from ..profiles import RECORD_NOTE, sources_for
+from ..process_inventory import process_names
 
 
 class AgentAdapter:
     capabilities = frozenset({"observe", "start", "stop", "backup", "verify", "restore", "open", "records"})
+    PROCESS_NAMES = {
+        "codex": {"codex", "codex.exe"},
+        "workbuddy": {"workbuddy", "workbuddy.exe"},
+        "codebuddy": {"codebuddy", "codebuddy.exe"},
+        "claude code": {"claude", "claude.exe"},
+    }
+    COMMAND_MARKERS = {
+        "codex": ("@openai/codex",),
+        "claude code": ("@anthropic-ai/claude-code", "claude-code/cli"),
+    }
+    CLI_HOSTS = {"node", "node.exe", "nodejs", "bun", "bun.exe", "deno", "deno.exe"}
 
     def __init__(self) -> None:
         self._processes: dict[str, subprocess.Popen] = {}
@@ -33,17 +44,38 @@ class AgentAdapter:
                 "note": RECORD_NOTE}
 
     def external_pids(self, resource: Resource) -> list[int]:
+        return self.external_pids_many([resource])[resource.id]
+
+    def external_pids_many(self, resources: list[Resource], cancel=None) -> dict[str, list[int]]:
+        """Share one process inventory across all registrations; retain CLI detection."""
         import psutil
         from pathlib import Path
-        names = {"Codex": {"codex", "codex.exe"}, "WorkBuddy": {"workbuddy", "workbuddy.exe"},
-                 "CodeBuddy": {"codebuddy", "codebuddy.exe"}, "Claude Code": {"claude", "claude.exe"}}.get(resource.options.get("engine"), set())
-        if executable := resource.options.get("executable"):
-            names = names | {Path(executable).name.casefold()}
-        matches = []
-        for process in psutil.process_iter(["pid", "name"]):
+        rules = []
+        matches = {resource.id: [] for resource in resources}
+        for resource in resources:
+            engine = str(resource.options.get("engine", "")).casefold()
+            names = set(self.PROCESS_NAMES.get(engine, set()))
+            if executable := resource.options.get("executable"):
+                names.add(Path(executable).name.casefold())
+            rules.append((resource.id, names, self.COMMAND_MARKERS.get(engine, ())))
+        if not any(names or markers for _, names, markers in rules):
+            return matches
+        for pid, process_name in process_names():
+            if cancel is not None and cancel.is_set():
+                break
             try:
-                if str(process.info["name"]).casefold() in names:
-                    matches.append(process.info["pid"])
+                name = str(process_name).casefold()
+                executable_name = ""
+                # Linux may truncate the comm name. Only inspect plausible matches.
+                if any(candidate.startswith(name) and candidate != name for _, names, _ in rules for candidate in names if name):
+                    executable_name = Path(psutil.Process(pid).exe()).name.casefold()
+                command_line = []
+                if name in self.CLI_HOSTS and any(markers for _, _, markers in rules):
+                    command_line = [str(part).replace("\\", "/").casefold() for part in psutil.Process(pid).cmdline()]
+                for identity, names, markers in rules:
+                    if (name in names or executable_name in names or
+                            any(marker in part for marker in markers for part in command_line)):
+                        matches[identity].append(pid)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return matches

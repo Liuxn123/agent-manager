@@ -1,201 +1,86 @@
-# Agent 管家
+# Agent 管家 · v0.7.0
 
-一个独立运行的 Python + PySide6 桌面项目，统一管理本地 Hermes、服务器 Hermes、本地项目和 Agent。关闭 Hermes 后仍然可以执行恢复。
+**每天开始 Agent 工作的个人工作台，用来管理今日工作、项目、Agent、Prompt/Skills/MCP 等资源，并保护重要 Agent 数据。**
 
-## v0.6.0：精简管理页与迁移任务清单
+打开程序，先看今天做什么，进入正在进行的项目，再找到需要的 Agent 和资源。每日计划、项目记录与资源正文保存在真实 Markdown 文件中，可以由 Obsidian 编辑；备份与恢复集中在“数据安全”。
 
-Hermes 与其他 Agent 改用顶部选择器，主要操作直接可见。服务器两个 Profile 分别展示资料目录，明确共用网关和现有整套原生备份。项目管理与 Obsidian 合并，myself 备份保留为小入口；项目日志默认按日期查看，填写完成、验证、问题与下一步。
+## 六个入口
 
-Agent / myself 新建 .amb 共用本次打开输入的密码，关闭后忘记，旧包仍用原密码。Codex 排除运行锁和沙箱，修复静止 SQLite 只读快照，保留完整 JSONL 末条记录；实际本机 5,869 个文件已在隔离目录完成加密、验证和恢复。必要文件不可读时指出路径，最终迁移前建议退出原应用重新备份。
+| 入口 | 解决什么问题 |
+| --- | --- |
+| 今日（默认首页） | 今天的日程和任务、继续的项目、最近使用项目、需要处理的异常 |
+| 项目 | 当前阶段与下一步、STATUS / TASKS / HANDOFF、阶段总结、笔记、归档与重新启用 |
+| Agent | Hermes、Codex、Claude Code、WorkBuddy、CodeBuddy 和手动登记 Agent 的常用入口、记录、目录、关联资源 |
+| 资源库 | 统一收藏、搜索和整理 Prompt / Skill / MCP / 工具 / 网站 / GitHub / 文章 / 模板等资料 |
+| 数据安全 | 原生 Hermes 备份恢复、加密 .amb、完整性校验、恢复演练、备份历史、换电脑恢复与操作记录 |
+| 设置 | 文字资料位置、备份位置和必要选项 |
 
-换电脑页面逐项显示文件、密码、完整性、目标和实际恢复结果。新增用户填写的工作总结；Token 用量手动、限量读取 Codex 本地字段，重复计数去重，不联网或启动后台服务。思路参考 [TokenTracker](https://github.com/xiufengsun/TokenTracker)，没有引入其框架。其他 Agent 的用量解析器保留扩展入口。
+资源库登记 MCP 的用途、安装与配置说明、安装 / 配置 / 测试状态；本版不连接 MCP，也不运行资源里的命令。阶段总结提供人工编辑和可复制 Prompt，不引入 AI 调度框架。
 
-完整分模块文档见 [使用说明](src/agent_manager/assets/docs/USER_GUIDE.md)。文件恢复、软件安装、登录与原客户端续聊分别核对。
+## 开始使用
 
-## v0.5.0：简单设置、可操作的工作台与通用资料库
-
-设置默认只展示备份位置和打开、更换按钮，其余选项收起。工作台移除全局记录搜索与七天活动图，改为“需要你处理”和“最近备份”，双击进入对应处理页面。
-
-独立“技能与工具”模块统一查看 Skills、MCP 和提示词。支持本地技能导入、复制给所选 Agent，以及通用提示词的新建与编辑；MCP 读取 JSON/TOML/YAML 配置清单，隐去授权内容，不自动改写配置或执行工具。通用库随便携 data 携带，可用现有加密流程备份。设计参考 [Skills Manager](https://github.com/xingkongliang/skills-manager)，没有复制其应用代码或引入其框架。
-
-备份页新增“能恢复什么”，明确数据恢复与安装软件、登录、会话接续的区别。图形界面流程测试使用新登记和新目标，验证中文文件、聊天文件、附件、SQLite 与自动登记；不把文件恢复当作所有客户端直接续聊的保证。见 [恢复范围与验证](src/agent_manager/assets/docs/RESTORE_SCOPE.md)。
-
-## v0.4.3：更清楚的管理页与 Hermes 资料浏览
-
-资源名称和长路径按实际文字高度换行，操作按钮在窄窗口自动换行，“恢复…”改为“恢复备份”。选中资源后可在“目录与操作”查看、复制完整路径或打开本地文件夹；“最近操作”查看该资料的操作，并跳转到按资源筛选的活动记录。
-
-本地 Hermes 增加“会话与技能”：搜索近期会话标题、查看最近用户/助手消息，或搜索和阅读 SKILL.md。服务器增加“网关日志”，读取所登记 systemd 服务最近 80 行；其他 Agent 增加直接“搜索记录”的入口。内容仅在查看窗口显示，不保存到任务结果。原有规范项目初始化、日志、归档、重新启用与 Obsidian 入口继续保留，设置保持简洁。
-
-## v0.4.2：仓库分工与 Agent 备份整理
-
-myself 沿用独立私有 Git 仓库；普通项目不检查 Git，不打包提交历史。其他 Agent 的已校验加密备份可在“备份与换电脑”一键整理到专用 `agent-backups` 仓库，按类型和资源编号分类，保留便携版中的原备份。只输出加密包和不含本机路径的索引，不收集口令或明文记录。单包限 50 MiB，较大备份直接用 U 盘携带。整理更新本地副本，提交与推送使用现有 Git 工具。
-
-## v0.4.1：与 Obsidian 使用同一份项目资料
-
-本地项目增加“Obsidian 中打开”：直接打开所选状态、任务、日志或笔记的原文件，使用标准 `obsidian://open` 接口，不需要插件。遵循登记表中的目录联接和无入口例外；入口缺失或指向错误目录时停止。
-
-“项目笔记”页签可以按需新建 Markdown，包含项目编号、草稿属性和管理入口。笔记保存在真实项目的 `笔记/`，归档与重新启用随项目一起保留；旧材料继续按原目录维护。当前项目文档和笔记在外部编辑后自动刷新，正文不复制到管家数据库。Obsidian 总览菜单可打开项目/归档索引，或按 STATUS 刷新生成索引并保留人工内容。
-
-第一次在 Obsidian 打开工作区里的 `myself` 知识库；换电脑后重新打开。管家不自动安装插件或修改 Obsidian 配置。目录联接与符号链接的同步、迁移有边界，需同时携带真实项目与管理文件；不能把 Vault 联接或 Sync 当作外部项目已备份的证明。归档前停止相关程序写入。
-
-## v0.4：规范项目管理
-
-本地项目主页面沿用 `projects.json` v2、`P-YYYY-NNN-名称`、projects/archive 与 STATUS/TASKS/HANDOFF 规范。支持新工作区初始化、新项目初始化、状态与任务文档编辑、追加日志、归档和重新启用。移动前后核对文件，并更新 Obsidian 入口与生成索引。旧 L-归档保持只读；目录联接/符号链接、目标冲突及跨文件系统移动会阻断归档。原备份功能保留在“资料备份与 Obsidian”页签。操作失败保留现场与移动记录，不自动回滚或重试。
-
-日常操作请看 [按模块使用说明](src/agent_manager/assets/docs/USER_GUIDE.md)。程序侧栏也提供“使用说明”，可离线阅读。设置页默认只展示备份位置，其他功能收起。[同类工具调研与功能建议](docs/RESEARCH.md) 单独列出尚未实现的建议。
-
-v0.3.1 简化设置页，并增加按模块跳转的离线使用说明。备份和恢复流程保持原有行为。
-
-## v0.3：工作台与 U 盘便携版
-
-日常使用集中在三个动作：**工作台查看状态 → 备份资料 → 需要时恢复**。工作台显示每项资料最近备份、校验、恢复演练和连接状态，以及最近七天的管家活动。资源页只保留常用按钮；校验、恢复演练、项目操作在“更多操作”中，技术参数在“配置与诊断”中。
-
-运行包默认便携模式，整目录可放在 U 盘：
-
-```text
-AgentManager/
-  AgentManager.exe       # Windows 启动入口
-  _internal/            # 必须一起携带的运行库
-  portable.json         # 便携模式标记
-  data/                 # 登记、设置、任务、校验证据、可选加密口令库
-  backups/              # 默认加密备份位置
-  restored/             # 默认迁移恢复位置
-```
-
-macOS 的 `portable.json` 和 `data/` 位于 `.app` 旁边；Linux 与 Windows 使用程序目录。将整个目录复制到 U 盘，不要只复制可执行文件。程序内目录使用相对位置保存，移动目录或改变盘符后会自动跟随；电脑上的外部项目、Hermes、SSH 文件仍需在新电脑重新选择。每个系统使用对应构建，Windows 的 EXE 不能直接在 macOS/Linux 执行。关闭程序、等待任务完成后再拔出 U 盘。
-
-备份口令可以临时输入；便携模式也可在**设置 → 解锁便携口令库**设置独立主口令，再在备份窗口勾选保存。`credentials.enc` 使用 scrypt + AES-GCM 加密，可以随 U 盘携带；程序关闭后重新解锁。不复制系统钥匙串，不自动复制 SSH 私钥。主口令需单独保管，无法从管家找回。
-
-- **自动备份**：在资源编辑窗口开启“每天自动备份”。只在管家打开时执行，默认关闭；加密资料需要已保存口令，便携口令库需已解锁。检测到 Agent 正在运行会延后重试。服务器自动备份暂不启用；本地 Hermes 沿用原生备份流程与推送设置。
-- **版本保留**：自动备份并完整校验成功后，才按设置保留最近 N 份。旧版本也必须能解锁且归属匹配才会清理；失败、口令已更换或不明归属的备份保留。Hermes 原生 Git 快照不使用此目录备份清理策略。
-- **恢复演练**：选中加密备份执行“恢复演练”，在临时目录实际恢复，逐文件比较哈希，完成后清理临时资料；原目录不覆盖。证据随管家数据保存，区分“已校验”和“已演练”。每次正式恢复仍完整重新校验。
-- **SQLite 快照**：其他 Agent 的打包备份使用 SQLite 只读在线备份接口，保存已提交数据，排除对应 WAL/SHM/Journal 辅助文件。每个数据库独立一致，不保证整个 Agent 的跨文件事务；普通文件发生变化会阻止备份，日常仍建议退出原应用。[SQLite 官方说明](https://sqlite.org/backup.html)。
-- **本地记录搜索**：支持跨 Agent 搜索可阅读记录和 Hermes 会话标题，结果不写入活动记录。每次最多读取 300 个记录文件和 32 MiB；搜索不改原应用数据，也不搜索云端独有记录。
-
-服务器配置新增明确的 **SSH 登录账号**、主机指纹文件和**读取已有服务器连接参数**按钮（复用 `HERMES_SERVER_*` 的公开路径与账号参数，不读取密码值）。检测分别报告 SSH、systemd 网关、CPU/内存/磁盘、备份工具与服务器口令文件。使用严格指纹校验；私钥不能代替登录账号。服务器备份文件校验不等于已经验证凭据解密，详情保留原生工具的实际报告。
-
-Workbench 迁移范围见 [迁移说明](docs/WORKBENCH_MIGRATION.md)。此项目独立运行，不依赖原 Workbench 插件。
-
-## Hermes 为主，也备份其他工作 Agent
-
-“其他工作 Agent”支持 Codex、WorkBuddy、CodeBuddy、Claude Code 和手动选择目录的其他工具。一次备份同时包含**项目文件夹**与一个或多个**本地记录 / 配置目录**，加密为一个 `.amb` 文件。Codex 默认候选来自 `CODEX_HOME` / `~/.codex`；WorkBuddy 的候选来自其本机应用数据目录，最终以用户选定目录为准。
-
-新电脑无需先导入配置：**工作台 → 换电脑恢复 → 输入口令 → 选择新文件夹 → 查看清单 → 恢复**。项目与记录可指定不同的子文件夹名称，全部校验后一次切换到总文件夹；恢复完成后自动登记为这台电脑的资料。既有登记保留，同一备份的恢复副本另行登记，不接管旧机器的启动程序。
-
-点击**浏览本地记录**可阅读 JSONL 对话、Markdown、TXT 和 JSON 文件。登录材料不作为聊天记录展示；阅读内容不会写入管家的操作记录。SQLite 数据库保存为一致性快照，其他数据库保存为稳定文件；原应用可能需要重新登录、重新登记项目路径或通过其导入功能继续会话。管家不会修改未公开的数据库结构，云端专有记录应先从原应用导出，再添加导出目录。
-
-备份前退出对应的 Agent，避免记录或数据库在复制过程中变化。记录目录默认排除缓存、日志、临时目录和 Codex 工作树；如需保存工作树项目，请单独选择它作为项目目录。数据库文件及登录文件如在选定目录内，会仅存入加密备份；系统钥匙串中的凭据仍需在新电脑重新登录。
-
-目录位置参考：[Codex 官方说明](https://learn.chatgpt.com/docs/config-file/config-advanced#config-and-state-locations)、[WorkBuddy 常见问题](https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/FAQ)、[CodeBuddy 目录说明](https://www.workbuddy.cn/docs/cli/codebuddy-dir)。候选目录不是对所有客户端版本的记录导入保证。
-
-## 初版功能
-
-| 页面 | 已实现能力 |
-|---|---|
-| 本地 Hermes | 运行根和工具路径配置、备份状态、原生备份/推送、快照校验、完整恢复预览与执行、救援位置报告、备份提交列表、配置启动程序、启停本工具启动的进程 |
-| 服务器 Hermes | SSH 连接、systemd 网关状态/启停/重启、服务器本机备份、校验、空目录恢复预览与执行；不自动启动恢复后的网关 |
-| 本地项目 | 规范初始化、状态/任务/日志、归档与重新启用、Obsidian 联动；资料加密备份与恢复，不检测项目 Git |
-| 其他工作 Agent | 类型预设、项目与多个记录目录一起备份、从文件直接恢复并登记、浏览文本记录、可选进程启停、适配器扩展接口 |
-| 备份中心 | 当前本地 Hermes 快照与加密目录备份列表、从指定备份恢复；列表元数据与实际校验分开 |
-| 任务记录 | 后台任务、结果、脱敏日志、安全检查点取消、启动后识别上次中断任务 |
-| 设置 | 备份位置、合并导入/导出资源配置、运行依赖检测、系统凭据保存/移除 |
-
-目录备份使用 AES-256-GCM + scrypt，直接将 ZIP 流加密，不生成明文 ZIP。包含工作文件、附件、选定目录设置；仅明确启用独立 Git 管理的知识库包含 Git 历史包。普通项目和 Agent 项目不检测或打包历史。默认排除 `.git`、`.venv`、`venv`、`node_modules`、`__pycache__`、`.cache`、`.pytest_cache`；额外排除按目录名设置。普通文件（包括 `.env`）仅在加密备份中保存。
-
-## 启动
-
-### 下载运行包
-
-私有仓库：[Agent Manager](https://github.com/Liuxn123/agent-manager)。登录后从 [版本下载页](https://github.com/Liuxn123/agent-manager/releases) 获取对应系统的运行包；最新测试构建也可在 Actions 的 **Desktop CI and packages** 中下载。包内有 README 与构建信息。
-
-- Windows：解压整包后打开 `AgentManager/AgentManager.exe`。
-- macOS：解压后打开 `AgentManager.app`；未签名构建需通过系统提供的“仍要打开”入口授权，不要求关闭系统保护。
-- Linux：解压 `.tar.gz` 后运行 `AgentManager/AgentManager`，使用 tar 保留可执行权限。
-
-运行包包含 Python 与 Qt，普通项目和 Agent 管理不要求另装 Python。Hermes 原生备份脚本仍需要可用的外部 Python 及其依赖；Git、GPG、SSH、Hermes 和 Obsidian 按使用的功能安装，并可在资源设置中指定路径。
-
-### 从源码运行
-
-需要 Python 3.11+ 和 Qt 支持的桌面系统；建议使用 Python 3.12。
-
-Windows PowerShell：
+Windows 便携包完整解压后运行 `AgentManager/AgentManager.exe`。保留整个目录；不要只复制 exe。macOS / Linux 使用对应平台运行包，源码模式也可运行。
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m agent_manager
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .
+.venv\Scripts\python -m agent_manager
 ```
 
-macOS / Linux：
+macOS / Linux：激活虚拟环境后 `python -m pip install -e . && python -m agent_manager`。Python 需要 3.11+。各平台分别打包，不能拿 Windows exe 在其他系统运行。
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/python -m agent_manager
-```
+第一次打开：
 
-Windows 已建立环境后可双击 `start.cmd`。应用默认使用系统应用数据目录，不依赖源码位置。便携模式：
+1. 在“项目”选择已有规范工作区（含 `agent/projects.json`），或初始化一个空文件夹。
+2. 在“今日”编辑今日计划；任务勾选立即写回每日 Markdown。
+3. 进入项目查看阶段与下一步，必要时添加关联 Agent 和资源。
+4. 在“Agent”登记常用工具，在“资源库”收藏说明与 Prompt。
+5. 需要保护资料时进入“数据安全”，沿用已有备份登记、口令与恢复流程。
+
+## Markdown 与 Obsidian
+
+有工作区时，默认文字资料放在 `myself/Agent工作台/`；没有工作区时放在管家数据目录的 `工作台/`。设置可选择另一个真实文件夹；选择 Obsidian 知识库内的目录即可共用。
 
 ```text
-agent-manager --data-dir /your/local/data
+Agent工作台/
+  每日/2026-10-05.md
+  资源/<唯一编号>.md
 ```
 
-同一个数据目录只允许一个窗口。路径在本机配置，没有固定盘符、用户名、IP 或账号凭据。
+每日文件使用 `# 日期`、`## 日程`、`## 今日任务`，任务为 `- [ ]` / `- [x]`，也兼容普通项目符号。资源使用 YAML frontmatter 与 Markdown 正文。项目阶段和关联 ID 可选地写入已有 STATUS，阶段总结追加到 HANDOFF，不创建重复的 SUMMARY / PROGRESS / REFLECTION 文件。
 
-## 首次配置
+外部修改会自动刷新。保存时比较原文件版本；若 Obsidian 已修改，拒绝覆盖并提示刷新。管家不创建或修改 `.obsidian` 配置。
 
-1. 在“本地 Hermes”页面选“从 Workspace 发现”，选择包含 `workspace.json` 的目录。确认后登记本地备份与项目；独立数据仓库仍保持自己的 Git 边界。
-2. 在本地 Hermes 中核对运行根、备份仓库、工具 Python、受保护口令文件；首次恢复前执行校验。
-3. 添加服务器，填写 SSH 别名、端口、远端目录、服务账号和服务范围。只填写私钥路径，不填写私钥内容。首次连接前通过受信任渠道核对指纹并建立 `known_hosts`；加密私钥先加载到 SSH Agent。
-4. 登记 Obsidian、其他项目和 Agent 目录。在设置中选择独立的备份保存目录。
-5. 项目/Agent 第一次备份输入独立口令，可选择保存到本机系统凭据存储；必须另存口令以便换电脑。
+## 数据兼容与安全
 
-服务器功能目前针对 Linux + systemd。SSH 的 `python3` 与仓库中的服务器工具需已安装；使用 root 连接时，备份工具通过 `runuser` 切换到登记的服务账号。用户服务管理必须用对应账号登录。
+- 原 `projects.json` schema 2、项目编号、目录、STATUS / TASKS / HANDOFF / 笔记、Agent 登记和 SQLite 配置继续使用。
+- v0.7 只增加 `workbench_schema=1` 配置标记；启动不会批量改写项目或搬动个人文件。旧工作笔记保留，并可在“今日 → 旧版工作笔记”查看。
+- `.amb` 仍使用原 schema 1 / AES-GCM 加密格式，保护聊天、配置、附件与工作文件；不生成明文中间 ZIP。SQLite 备份包括已提交的 WAL 数据。
+- 恢复先预览、校验再确认；.amb 恢复只写入新目录或空目录。恢复演练使用临时目录，不覆盖原资料。
+- Hermes 继续使用原生备份与恢复工具；服务器 SSH 严格验证主机指纹，不自动连接、恢复或启动网关。
+- 项目 Git 不自动检测；myself 的 Git 管理需明确开启。专用 Agent 备份仓库只整理已经校验的加密副本。
+- U 盘内的程序配置路径随便携目录移动；外部项目 / 知识库 / SSH 私钥仍需自行携带或重新选择。资料 Markdown 不会被当作应用数据库正文保存。
 
-Agent 启动用于非交互进程；终端交互型 CLI 请在终端使用。参数填写 JSON 字符串数组，例如 `["-m", "my_agent"]`，不通过 shell 拼接命令。停止按钮只控制本窗口启动的进程，不按 PID 接管外部 Agent；退出程序后进程可继续运行，但下次打开不能直接接管。
+资料文件夹在 U 盘外时，移动程序本身不会携带它。可把资料文件夹登记为 Obsidian / 项目备份，或在关闭相关应用后复制整个资料文件夹。原应用的登录、运行环境与能否续聊，仍需在目标电脑验证。
 
-## 恢复与迁移
+## 验证与打包
 
-本地 Hermes：校验 → 恢复预览 → 核对目标并退出 Hermes → 确认恢复。执行通过原生备份锁与定时备份互斥，复用原生救援目录与数据库重建。完整恢复按快照精确镜像会话，可能移除当前独有会话；口令失败由原生工具在写入前拦截。
-
-项目、Vault、通用 Agent：选择 `.amb` → 口令解锁 → 校验全部哈希 → 预览 → 恢复到新目录或空目录。目标非空则拒绝；内容先恢复到暂存目录，全部完成后切换。目录符号链接/联接排除并报告；备份与恢复目标拒绝重叠。
-
-仅启用“独立管理知识库 Git”的知识库，以及旧版本带历史的备份，会含有 `.agent-manager-history.bundle`；工作目录文件保持备份时版本。普通项目和 Agent 项目不再生成历史包。恢复已有历史包可另外执行：
-
-```text
-git clone /restored/path/.agent-manager-history.bundle /new/repository
+```powershell
+.venv\Scripts\python -m unittest discover -s tests -q
+.venv\Scripts\python scripts/build.py
+.venv\Scripts\python scripts/smoke_package.py
 ```
 
-随后对照恢复目录将工作文件复制到新仓库，保留未提交和未跟踪文件。初版不自动拼接 `.git` 与工作树，避免覆盖用户当前修改。子模块或嵌套仓库应分别登记，目录备份不会隐式备份每个嵌套仓库的本地 Git 历史。
+测试覆盖加密恢复、错误口令 / 篡改 / 路径边界、SQLite / JSONL 快照、迁移登记、便携路径、项目归档、Obsidian 联动、每日任务、资源编辑冲突、阶段总结与界面衔接。CI 为 Windows、Linux、macOS Intel / Apple Silicon 分别构建。
 
-服务器：校验 → 指定空目录 → 预览 → 确认恢复三个 home。数据恢复完成后仍需要安装 pinned runtime、检查并安装服务、验证知识库位置、确保旧网关已停后启用新网关。初版不提供生产服务器原地覆盖或自动回滚。
+## 文档
 
-换电脑：复制 `.amb` 文件，直接使用“从备份文件恢复”；名称、目录范围和登记信息从解密后的清单取得，侧车 JSON 丢失不影响恢复。Hermes 原生备份仍从对应 Hermes 页面恢复。导出资源配置可另外保存登记清单；它不包含资料、系统凭据、SSH 私钥或 Git 登录。
+- [分模块使用说明](src/agent_manager/assets/docs/USER_GUIDE.md)
+- [恢复范围与限制](src/agent_manager/assets/docs/RESTORE_SCOPE.md)
+- [架构与数据关系](docs/ARCHITECTURE.md)
+- [路线图](docs/ROADMAP.md)
+- [v0.7.0 版本说明](docs/RELEASE_NOTES.md)
+- [性能检查](docs/PERFORMANCE.md)
+- [本机验证记录](docs/VALIDATION.md)
 
-## 数据与边界
-
-- 发布包默认数据位置是程序旁的 `data/`；无 `portable.json` 的源码/本机模式使用 Windows `%LOCALAPPDATA%/AgentManager`、macOS `~/Library/Application Support/AgentManager`、Linux `${XDG_DATA_HOME:-~/.local/share}/agent-manager`。`--data-dir` 可覆盖。
-- SQLite 只存资源配置、设置、任务结果、校验证据和脱敏日志。明文凭据字段拒绝保存；便携口令库或系统钥匙串保存备份口令，SSH/GPG 使用现有受保护材料。
-- 命令失败不保存原始 stderr；敏感字段与常见令牌格式清洗后才写任务结果。
-- 系统凭据存储不可用时明确报错，不回退到明文文件。
-- `.amb` 首版单包限制 50 GiB / 20 万文件；需要更大目录可拆分登记。还原解密可能使用系统受限临时文件，结束时关闭清理。
-- 请在外部写入程序退出后进行目录备份；本工具会检查复制期间文件是否变化，但不提供操作系统文件系统快照。
-- 取消请求在安全点生效；原生恢复和关键写入不强杀。SSH 中断/超时仅表示未取得结果，需检查服务器实际状态后重试，不代表远端一定失败。
-- 中断任务启动后标记为待检查，不自动重复恢复。后续会补远端持久任务 ID 和可恢复的检查点。
-
-## 开发与打包
-
-```text
-python -m unittest discover -s tests -v
-python -m compileall -q src scripts
-python -m pip install -e ".[build]" -r requirements-build.txt
-python scripts/build.py
-```
-
-构建会生成目录包及压缩包。CI 在 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 上测试、构建并执行打包程序启动检查。不同系统分别打包，不能用 Windows exe 在 macOS/Linux 运行；其他硬件/旧操作系统受 Qt 与依赖支持范围限制。
-
-Windows 构建会隔离 DLL 搜索路径，避免 PATH 中其他工具的 ICU/系统 DLL 混入。压缩包每次从全新暂存目录生成，并保留 macOS app 内部链接。Intel macOS 使用 `OPENSSL_STATIC=1` 从源码构建当前 cryptography（首次安装加 `--no-cache-dir --no-binary=cryptography`），避免 Homebrew OpenSSL 与 Python 自带库发生冲突；CI 已配置此步骤。启动检查直接解压并运行最终压缩包，而不是只检查构建目录。
-
-UI 验证：`QT_QPA_PLATFORM=offscreen python -m agent_manager --data-dir /tmp/test-data --smoke-test --screenshot /tmp/window.png`。测试全部使用临时目录和测试进程，不连接生产服务器、不覆盖真实运行资料。
-
-扩展与下一步见 [架构](docs/ARCHITECTURE.md) 和 [路线图](docs/ROADMAP.md)。
+不提供邮件、云盘或完整日历客户端，不开发完整 MCP Host、工作流引擎、多 Agent 自动编排、浏览器自动化或 Obsidian 替代品。扩展以实际日常使用需求为依据。

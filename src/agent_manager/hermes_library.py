@@ -1,7 +1,6 @@
-"""Bounded, read-only Hermes session metadata and skill inspection."""
+"""Bounded, read-only Hermes session metadata and preview."""
 from __future__ import annotations
 
-import os
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -16,7 +15,7 @@ from .security import redact
 
 def _home(resource: Resource) -> Path:
     if resource.kind != "hermes_local":
-        raise UserError("会话与技能浏览目前用于本地 Hermes。")
+        raise UserError("会话浏览目前用于本地 Hermes。")
     return required_directory(resource.options, "home")
 
 
@@ -51,8 +50,8 @@ def _time(value) -> str:
 
 def list_library(resource: Resource, context: TaskContext) -> dict:
     home = _home(resource)
-    sessions, skills = [], []
-    note = "会话标题和技能来自本机，阅读不会更改原应用；不展示系统提示词、登录凭据或工具调用数据。"
+    sessions = []
+    note = "会话标题来自本机，阅读不会更改原应用；不展示系统提示词、登录凭据或工具调用数据。"
     if (home / "state.db").exists():
         try:
             with closing(_connection(home, context)) as db:
@@ -74,37 +73,15 @@ def list_library(resource: Resource, context: TaskContext) -> dict:
             context.checkpoint()
             raise UserError("会话数据库暂时无法读取，请稍后重试。") from exc
     else:
-        note += " 运行目录里没有 state.db，当前只列技能。"
-    root = home / "skills"
-    if root.is_dir() and not is_link(root):
-        visited = 0
-        for current, directories, files in os.walk(root, followlinks=False):
-            context.checkpoint()
-            visited += 1
-            if visited > 3000 or len(skills) >= 200:
-                break
-            directory = Path(current)
-            depth = len(directory.relative_to(root).parts)
-            directories[:] = [name for name in sorted(directories) if depth < 4 and not name.startswith(".") and name not in {"node_modules", "cache"} and not is_link(directory / name)]
-            if "SKILL.md" in files and not is_link(directory / "SKILL.md"):
-                relative = (directory / "SKILL.md").relative_to(root).as_posix()
-                skills.append({"name": directory.name, "relative": relative})
-    return {"sessions": sessions, "skills": skills, "note": note + " 最多列 100 个近期会话与 200 个技能；隐藏会话不列出。"}
+        note += " 运行目录里没有 state.db，无法列出本地会话。"
+    return {"sessions": sessions, "note": note + " 最多列 100 个近期会话；隐藏会话不列出。"}
 
 
 def read_item(resource: Resource, category: str, identity: str, context: TaskContext) -> dict:
     home = _home(resource)
     context.checkpoint()
-    if category == "skill":
-        if not identity.endswith("SKILL.md"):
-            raise UserError("只能浏览已登记技能的 SKILL.md。")
-        path = _file(home / "skills", identity)
-        with path.open("rb") as reader:
-            data = reader.read(128 * 1024)
-            truncated = bool(reader.read(1))
-        return {"text": redact(data.decode("utf-8", "replace")) + ("\n\n[内容较长，仅显示前 128 KiB]" if truncated else "")}
     if category != "session" or not isinstance(identity, str) or not 0 < len(identity) <= 512:
-        raise UserError("会话编号或浏览类型不正确。")
+        raise UserError("会话编号不正确。")
     try:
         with closing(_connection(home, context)) as db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}

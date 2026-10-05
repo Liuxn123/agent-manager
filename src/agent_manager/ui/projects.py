@@ -6,15 +6,19 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, QEvent, QFileSystemWatcher
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QTextOption
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QPushButton,
     QComboBox, QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QSplitter, QTextBrowser, QDialog, QDialogButtonBox, QFormLayout, QTextEdit, QCheckBox,
-    QFileDialog, QMessageBox, QListWidget, QListWidgetItem, QInputDialog, QToolButton, QMenu)
+    QFileDialog, QMessageBox, QListWidget, QListWidgetItem, QInputDialog, QToolButton, QMenu,
+    QFrame, QSizePolicy)
 
 from ..domain import Resource, UserError
 from ..project_workspaces import ProjectWorkspace, STATES
 from ..obsidian import project_uri, index_uri
+from ..workbench import (PHASES, TYPES, Catalog, work_root, project_context, set_project_details,
+    stage_template, stage_prompt, append_stage, summaries)
+from ..storage import now
 from .components import FlowLayout
 
 
@@ -99,22 +103,31 @@ class ProjectPage(QWidget):
         self.note_version = 0
         self.watch_paths = []
         self.preferred_note = ""
+        self.preferred_project = ""
+        self.status_text, self.task_text, self.project_catalog = "", "", []
+        self.project_details = {}
         self.closed = False
         layout = QVBoxLayout(self)
-        title = QLabel("本地项目")
+        title = QLabel("项目")
         title.setObjectName("Title")
         layout.addWidget(title)
-        note = QLabel("按编号规范创建项目，维护状态、任务和日志；需要时归档或重新启用。")
+        note = QLabel("看当前阶段、下一步和最近记录。沿用已有 STATUS、TASKS 和 HANDOFF，不重复保存正文。")
         note.setWordWrap(True)
         note.setObjectName("Subtitle")
         layout.addWidget(note)
         lifecycle = QWidget()
         body = QVBoxLayout(lifecycle)
         body.setContentsMargins(0, 8, 0, 0)
-        root_row = QHBoxLayout()
+        root_panel = QFrame()
+        root_panel.setObjectName("Card")
+        root_row = QHBoxLayout(root_panel)
+        root_row.setContentsMargins(14, 8, 14, 8)
+        root_row.setSpacing(10)
         self.root_label = QLabel()
         self.root_label.setWordWrap(True)
         self.root_label.setObjectName("Subtitle")
+        self.root_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.root_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         root_row.addWidget(self.root_label, 1)
         self.obsidian_menu = QToolButton()
         self.obsidian_menu.setText("Obsidian 总览")
@@ -126,20 +139,29 @@ class ProjectPage(QWidget):
         menu.addSeparator()
         menu.addAction("刷新 Obsidian 索引", self.refresh_indexes)
         self.obsidian_menu.setMenu(menu)
-        body.addLayout(root_row)
-        root_actions = FlowLayout()
-        root_actions.addWidget(self.obsidian_menu)
         choose = QPushButton("选择工作区…")
         choose.clicked.connect(self.choose_workspace)
-        root_actions.addWidget(choose)
+        choose.setMinimumWidth(140)
+        root_row.addWidget(choose)
+        root_row.addWidget(self.obsidian_menu)
+        body.addWidget(root_panel)
+
+        myself_panel = QFrame(self)
+        myself_panel.setObjectName("Card")
+        root_actions = QHBoxLayout(myself_panel)
+        root_actions.setContentsMargins(14, 7, 14, 7)
+        root_actions.setSpacing(8)
         self.myself_status = QLabel()
-        self.myself_status.setWordWrap(True)
+        self.myself_status.setObjectName("SectionTitle")
+        self.myself_status.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         root_actions.addWidget(self.myself_status)
+        root_actions.addStretch(1)
         for label, action in [("备份 myself", "backup"), ("恢复 myself", "restore"), ("myself 配置", "edit")]:
             control = QPushButton(label)
             control.clicked.connect(lambda checked=False, action=action: self.myself_action(action))
             root_actions.addWidget(control)
-        body.addLayout(root_actions)
+        # Protection controls are centralized under Data Safety.
+        myself_panel.hide()
         toolbar = QHBoxLayout()
         self.new_button = QPushButton("新建项目")
         self.new_button.setProperty("primary", True)
@@ -158,7 +180,8 @@ class ProjectPage(QWidget):
         refresh.clicked.connect(self.refresh)
         toolbar.addWidget(refresh)
         body.addLayout(toolbar)
-        actions = FlowLayout()
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
         self.open_button = QPushButton("打开文件夹")
         self.open_button.clicked.connect(self.open_project)
         self.obsidian_button = QPushButton("Obsidian 中打开")
@@ -172,7 +195,25 @@ class ProjectPage(QWidget):
         self.move_button.clicked.connect(self.move_project)
         for widget in (self.open_button, self.obsidian_button, self.log_button, self.edit_button, self.move_button):
             actions.addWidget(widget)
+        actions.addStretch(1)
         body.addLayout(actions)
+        stage = QFrame()
+        stage.setObjectName("Card")
+        stage_layout = QVBoxLayout(stage)
+        self.stage_label = QLabel("选择项目后显示当前阶段和下一步。")
+        self.stage_label.setWordWrap(True)
+        self.stage_label.setObjectName("SectionTitle")
+        stage_layout.addWidget(self.stage_label)
+        stage_actions = FlowLayout()
+        self.stage_button = QPushButton("阶段与关联资料")
+        self.stage_button.clicked.connect(self.edit_stage)
+        self.summary_button = QPushButton("写阶段总结")
+        self.summary_button.clicked.connect(self.write_stage_summary)
+        for control in (self.stage_button, self.summary_button):
+            stage_actions.addWidget(control)
+        stage_actions.addWidget(self._resource_button())
+        stage_layout.addLayout(stage_actions)
+        body.addWidget(stage)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["编号", "项目", "状态"])
@@ -193,6 +234,10 @@ class ProjectPage(QWidget):
         for name in ("当前状态", "任务入口", "日志与交接"):
             view = QTextBrowser()
             view.setOpenExternalLinks(True)
+            view.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            text_option = QTextOption()
+            text_option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+            view.document().setDefaultTextOption(text_option)
             if name == "日志与交接":
                 self.log_view = ProjectLogView(view)
                 self.documents.addTab(self.log_view, "项目日志")
@@ -218,9 +263,24 @@ class ProjectPage(QWidget):
         self.note_view.setOpenExternalLinks(True)
         notes_layout.addWidget(self.note_view, 1)
         self.documents.addTab(notes_page, "项目笔记")
-        self.documents.currentChanged.connect(self.selection_changed)
+        self.summary_view = QTextBrowser()
+        self.summary_view.setOpenExternalLinks(True)
+        self.documents.addTab(self.summary_view, "阶段总结")
+        related_page = QWidget()
+        related_layout = QVBoxLayout(related_page)
+        related_layout.addWidget(QLabel("双击打开关联 Agent 或资源。关联编号保存在 STATUS；正文保存在资源 Markdown。"))
+        self.related_list = QListWidget()
+        self.related_list.setWordWrap(True)
+        self.related_list.itemDoubleClicked.connect(self.open_related)
+        related_layout.addWidget(self.related_list)
+        self.documents.addTab(related_page, "关联资料")
+        self.documents.setMinimumWidth(400)
+        self.documents.currentChanged.connect(self.update_selection_actions)
         split.addWidget(self.documents)
-        split.setSizes([340, 620])
+        split.setChildrenCollapsible(False)
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 4)
+        split.setSizes([380, 620])
         body.addWidget(split, 1)
         self.message = QLabel("请选择已有工作区，或选择一个空文件夹初始化。")
         self.message.setObjectName("Subtitle")
@@ -241,7 +301,133 @@ class ProjectPage(QWidget):
         self.watcher.directoryChanged.connect(lambda _: self.reload_timer.start())
         self.window.installEventFilter(self)
         self.render()
-        QTimer.singleShot(0, self.refresh)
+        # Load project files when this page is opened, rather than at startup.
+
+    def _resource_button(self):
+        control = QPushButton("查看项目资源")
+        control.clicked.connect(self.show_project_resources)
+        return control
+
+    def render_related(self, item):
+        self.related_list.clear()
+        agents = self.project_details.get("agents", [])
+        linked = self.project_details.get("resources", [])
+        known = set()
+        for resource in self.window.store.resources():
+            if resource.id in agents or item["id"] in resource.options.get("project_ids", []):
+                cell = QListWidgetItem("Agent · " + resource.name)
+                cell.setData(Qt.ItemDataRole.UserRole, ("agent", resource.id))
+                self.related_list.addItem(cell)
+                known.add(resource.id)
+        for resource in self.project_catalog:
+            if resource["id"] in linked or item["id"] in resource["metadata"].get("projects", []):
+                cell = QListWidgetItem(TYPES[resource["type"]] + " · " + resource["name"])
+                cell.setData(Qt.ItemDataRole.UserRole, ("resource", resource["id"]))
+                self.related_list.addItem(cell)
+                known.add(resource["id"])
+        for identity in [*agents, *linked]:
+            if identity not in known:
+                self.related_list.addItem("暂未找到关联资料：" + identity + "（保留引用）")
+        if not self.related_list.count():
+            self.related_list.addItem("还没有关联资料。点“阶段与关联资料”选择，或在资源库填写适用项目编号。")
+
+    def open_related(self, item):
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if not value:
+            return
+        kind, identity = value
+        if kind == "agent":
+            self.window.navigation.setCurrentRow(self.window.AGENT)
+            self.window.agent_page.refresh(identity)
+        else:
+            self.show_project_resources()
+            self.window.catalog_page.search.setText(next((i["name"] for i in self.project_catalog if i["id"] == identity), ""))
+
+    def show_project_resources(self):
+        item = self.selected()
+        if item:
+            page = self.window.catalog_page
+            page.project_filter, page.agent_filter = item["id"], ""
+            page.related_ids = self.project_details.get("resources", [])
+            page.search.clear()
+            self.window.navigation.setCurrentRow(self.window.LIBRARY)
+
+    def edit_stage(self):
+        item = self.selected()
+        if not item or not self.status_text:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("项目阶段与关联资料")
+        dialog.resize(680, 590)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("只补充 STATUS 字段；不改变任务、交接正文和项目编号。阶段可自行命名。"))
+        phase = QComboBox()
+        phase.setEditable(True)
+        phase.addItems(PHASES)
+        phase.setCurrentText(self.project_details["phase"])
+        layout.addWidget(phase)
+        picks = []
+        groups = [("关联 Agent", "agents", [(r.id, r.name) for r in self.window.store.resources() if r.kind in {"agent", "hermes_local", "hermes_server"}]),
+                  ("关联 Prompt / Skill / 资源", "resources", [(r["id"], r["name"]) for r in self.project_catalog])]
+        for title, key, rows in groups:
+            layout.addWidget(QLabel(title))
+            listing = QListWidget()
+            existing = self.project_details.get(key, [])
+            for identity, name in rows:
+                cell = QListWidgetItem(name)
+                cell.setData(Qt.ItemDataRole.UserRole, identity)
+                cell.setFlags(cell.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                cell.setCheckState(Qt.CheckState.Checked if identity in existing else Qt.CheckState.Unchecked)
+                listing.addItem(cell)
+            layout.addWidget(listing, 1)
+            picks.append((listing, [v for v in existing if v not in {r[0] for r in rows}]))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        expected = self.status_text
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = [[*unknown, *[listing.item(i).data(Qt.ItemDataRole.UserRole) for i in range(listing.count()) if listing.item(i).checkState() == Qt.CheckState.Checked]] for listing, unknown in picks]
+        workspace, name = self.workspace(), phase.currentText()
+        self.submit("更新项目阶段与关联", lambda context: set_project_details(workspace, item["id"], name, values[0], values[1], expected, context), lambda _: self.selection_changed(), persist_result=False)
+
+    def write_stage_summary(self):
+        item = self.selected()
+        if not item or not self.status_text:
+            return
+        phase = self.project_details["phase"]
+        prompt = stage_prompt(item["name"], phase, self.status_text, self.task_text)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("阶段总结 · " + phase)
+        dialog.resize(780, 650)
+        layout = QVBoxLayout(dialog)
+        hint = QLabel("人工填写，或复制 Prompt 到常用 Agent，再把结果粘贴回来。保存后追加到 HANDOFF，原交接保留。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        from PySide6.QtWidgets import QApplication
+        copy = QPushButton("复制生成总结 Prompt")
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(prompt))
+        layout.addWidget(copy)
+        editor = QTextEdit()
+        editor.setAcceptRichText(False)
+        editor.setPlainText(stage_template(phase))
+        layout.addWidget(editor, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("追加阶段总结")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        workspace, body = self.workspace(), editor.toPlainText()
+        def saved(_):
+            self.selection_changed()
+            self.documents.setCurrentIndex(4)
+        self.submit("追加项目阶段总结", lambda context: append_stage(workspace, item["id"], phase, body, context), saved, persist_result=False)
 
     def myself_resource(self):
         return next((r for r in self.window.store.resources() if r.kind in {"project", "vault"} and Path(r.options.get("path", "")).name.casefold() == "myself"), None)
@@ -261,18 +447,7 @@ class ProjectPage(QWidget):
             self.window.perform(resource, action)
 
     def show_backup_resource(self, resource):
-        # Legacy/restored registrations remain accessible without a second project tab.
-        dialog = QDialog(self)
-        dialog.setWindowTitle("资料备份 · " + resource.name)
-        dialog.resize(1000, 680)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(self.backup_page)
-        self.backup_page.show()
-        row = next((i for i, r in enumerate(self.backup_page.rows) if r.id == resource.id), 0)
-        self.backup_page.resources_table.selectRow(row)
-        dialog.exec()
-        self.backup_page.setParent(self)
-        self.backup_page.hide()
+        self.window.open_safety_resource(resource)
 
     def root(self) -> Path | None:
         value = self.window.store.setting("project_workspace", "")
@@ -357,21 +532,30 @@ class ProjectPage(QWidget):
                 cell.setToolTip(item.get("error") or item["directory"])
                 self.table.setItem(row, column, cell)
         if self.rows:
-            self.table.selectRow(next((i for i, p in enumerate(self.rows) if selected and p["id"] == selected["id"]), 0))
+            identity = self.preferred_project or (selected["id"] if selected else "")
+            self.table.selectRow(next((i for i, p in enumerate(self.rows) if p["id"] == identity), 0))
+            self.preferred_project = ""
         self.table.blockSignals(False)
         self.selection_changed()
 
-    def selection_changed(self):
+    def update_selection_actions(self, *_):
         item = self.selected()
         enabled = bool(item)
         archived = bool(item and item["path"].startswith("archive/"))
         self.open_button.setEnabled(enabled)
-        self.obsidian_button.setEnabled(enabled and self.documents.currentIndex() < 3)
+        self.obsidian_button.setEnabled(enabled and (self.documents.currentIndex() != 3 or self.note_list.currentItem() is not None))
         self.new_note_button.setEnabled(enabled and not archived)
         self.log_button.setEnabled(enabled and not archived)
         self.edit_button.setEnabled(enabled and not archived and self.documents.currentIndex() < 2)
         self.move_button.setEnabled(enabled and not item.get("legacy", False) if item else False)
         self.move_button.setText("重新启用…" if archived else "归档项目…")
+        self.stage_button.setEnabled(enabled and not archived and bool(self.status_text))
+        self.summary_button.setEnabled(enabled and not archived and bool(self.status_text))
+
+    def selection_changed(self):
+        self.status_text, self.task_text = "", ""
+        self.update_selection_actions()
+        item = self.selected()
         self.document_version += 1
         version = self.document_version
         self.note_version += 1
@@ -385,6 +569,10 @@ class ProjectPage(QWidget):
         for view in self.views:
             view.setPlainText("选择项目查看管理资料。" if not item else "读取中…")
         if not item:
+            self.status_text, self.task_text = "", ""
+            self.stage_label.setText("选择项目后显示当前阶段和下一步。")
+            self.summary_view.clear()
+            self.related_list.clear()
             self.watch_paths = []
             self.update_watches([])
             return
@@ -393,11 +581,21 @@ class ProjectPage(QWidget):
             workspace = ProjectWorkspace(root)
             documents = [workspace.document(identity, relative) for relative in self.document_paths]
             notes = workspace.notes(identity, context)["notes"]
+            library = Catalog(work_root(self.window.store)).scan(context)
             paths = [str(workspace.registry_path), str(workspace.registry_path.parent), *[d["path"] for d in documents], str(workspace.path(item["path"] + "/agent")), str(workspace.path(item["path"])), str(workspace.path(item["path"] + "/笔记"))]
-            return {"documents": documents, "notes": notes, "watch_paths": paths}
+            paths += [str(work_root(self.window.store) / "资源"), *[i["path"] for i in library["items"]]]
+            return {"documents": documents, "notes": notes, "watch_paths": paths, "catalog": library["items"]}
         def show(report):
             if version != self.document_version:
                 return
+            self.status_text, self.task_text = report["documents"][0]["text"], report["documents"][1]["text"]
+            self.project_details = project_context(self.status_text, item["state"])
+            self.project_catalog = report["catalog"]
+            self.stage_label.setText(item["name"] + " · " + self.project_details["phase"] + "\n下一步：" + self.project_details["next_step"])
+            blocks = summaries(report["documents"][2]["text"])
+            self.summary_view.setMarkdown("\n\n---\n\n".join(reversed(blocks)) if blocks else "还没有阶段总结。点击“写阶段总结”，可人工填写或复制 Prompt 到常用 Agent。总结追加到原 HANDOFF 文件。")
+            self.render_related(item)
+            self.update_selection_actions()
             for view, document in zip(self.views, report["documents"]):
                 view.document().setBaseUrl(QUrl.fromLocalFile(str(Path(document["path"]).parent) + os.sep))
                 if view is self.views[2]:
@@ -447,7 +645,7 @@ class ProjectPage(QWidget):
 
     def note_changed(self, *_):
         item, note = self.selected(), self.note_list.currentItem()
-        self.obsidian_button.setEnabled(bool(item) and (self.documents.currentIndex() < 3 or bool(note)))
+        self.obsidian_button.setEnabled(bool(item) and (self.documents.currentIndex() != 3 or bool(note)))
         self.note_version += 1
         version = self.note_version
         if not item or not note:
@@ -486,7 +684,7 @@ class ProjectPage(QWidget):
         note = self.note_list.currentItem()
         if not item or index == 3 and not note:
             return
-        relative = self.document_paths[index] if index < 3 else note.data(Qt.ItemDataRole.UserRole)
+        relative = self.document_paths[index] if index < 3 else note.data(Qt.ItemDataRole.UserRole) if index == 3 else "agent/HANDOFF.md" if index == 4 else "agent/STATUS.md"
         workspace = self.workspace()
         self.submit("定位 Obsidian 项目文档", lambda context: project_uri(workspace, item["id"], relative), self.launch_obsidian, persist_result=False)
 

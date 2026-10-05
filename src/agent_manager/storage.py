@@ -59,6 +59,7 @@ class Store:
                     id TEXT PRIMARY KEY, resource_id TEXT, title TEXT, state TEXT,
                     started_at TEXT, finished_at TEXT, log TEXT, result TEXT
                 );
+                CREATE INDEX IF NOT EXISTS tasks_resource ON tasks(resource_id);
                 PRAGMA user_version=1;
             """)
 
@@ -150,3 +151,16 @@ class Store:
             if resource_id is not None:
                 return [dict(row) for row in db.execute("SELECT * FROM tasks WHERE resource_id=? ORDER BY rowid DESC LIMIT ?", (resource_id, limit))]
             return [dict(row) for row in db.execute("SELECT * FROM tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
+
+    def task_summaries(self, limit: int = 100, resource_id: str | None = None) -> list[dict[str, Any]]:
+        """List rows without loading every historical log and result body."""
+        columns = "id, resource_id, title, state, started_at, finished_at"
+        with self.connect() as db:
+            if resource_id is not None:
+                return [dict(row) for row in db.execute(f"SELECT {columns} FROM tasks WHERE resource_id=? ORDER BY rowid DESC LIMIT ?", (resource_id, limit))]
+            return [dict(row) for row in db.execute(f"SELECT {columns} FROM tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
+
+    def task(self, identity: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM tasks WHERE id=?", (identity,)).fetchone()
+        return dict(row) if row else None

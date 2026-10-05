@@ -21,7 +21,7 @@ def readable_size(value: int) -> str:
     return f"{value / 1024 ** 2:.1f} MB"
 
 ACTION_LABELS = {"observe": "检查状态", "backup": "创建备份", "verify": "校验备份", "restore": "恢复", "open": "打开目录",
-                 "versions": "备份提交列表", "start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "Git 拉取", "open_vault": "打开 Obsidian", "records": "浏览本地记录", "library": "会话与技能", "logs": "网关日志"}
+                 "versions": "备份提交列表", "start": "启动", "stop": "停止", "restart": "重启网关", "git_pull": "Git 拉取", "open_vault": "打开 Obsidian", "records": "浏览本地记录", "library": "浏览会话", "logs": "网关日志"}
 FIELD_LABELS = {"home": "运行目录", "home_present": "运行目录存在", "backup_repo": "备份仓库", "snapshot_present": "存在快照",
     "observed_at": "最近检测时间", "memory_used_percent": "内存使用率（%）", "external_process_count": "原应用进程数量",
     "backup_repo_present": "备份仓库存在", "backup_tool_present": "备份工具存在", "restore_tool_present": "恢复工具存在",
