@@ -2,6 +2,8 @@ import json
 import shutil
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 from datetime import date
 from pathlib import Path
 
@@ -123,6 +125,40 @@ class WorkbenchTests(unittest.TestCase):
             self.skipTest("Symbolic link creation unavailable")
         with self.assertRaises(UserError):
             Agenda(self.root).scan()
+
+    def test_windows_busy_read_handle_retries_without_losing_markdown(self):
+        daily = Daily(self.root)
+        daily.add_entry("今日任务", "保留任务", None)
+        original = daily.load()["text"]
+        replace = os.replace
+        blocked = PermissionError("Windows sharing violation")
+        blocked.winerror = 32
+        calls = []
+        def temporarily_busy(source, target):
+            calls.append(target)
+            if len(calls) == 1:
+                raise blocked
+            return replace(source, target)
+        with patch("agent_manager.workbench.os.replace", side_effect=temporarily_busy), patch("agent_manager.workbench.time.sleep"):
+            daily.add_entry("日程", "保存成功", original)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("保留任务", daily.load()["text"])
+        self.assertIn("保存成功", daily.load()["text"])
+        self.assertFalse(list(self.root.rglob("*.tmp")))
+
+    def test_external_edit_during_windows_rename_retry_is_never_overwritten(self):
+        daily = Daily(self.root)
+        daily.add_entry("今日任务", "原任务", None)
+        report = daily.load()
+        blocked = PermissionError("Windows sharing violation")
+        blocked.winerror = 32
+        external = report["text"] + "\nObsidian 新内容\n"
+        with patch("agent_manager.workbench.os.replace", side_effect=blocked), patch("agent_manager.workbench.time.sleep", side_effect=lambda _: Path(report["path"]).write_text(external, encoding="utf-8")):
+            with self.assertRaises(UserError):
+                daily.add_entry("日程", "不应覆盖", report["original"])
+        self.assertEqual(daily.load()["text"], external)
+        self.assertFalse((self.root / ".write.lock").exists())
+        self.assertFalse(list(self.root.rglob("*.tmp")))
 
     def test_library_frontmatter_unknown_fields_external_edits_and_duplicates(self):
         catalog = Catalog(self.root)

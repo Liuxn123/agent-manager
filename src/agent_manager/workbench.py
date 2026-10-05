@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import date
@@ -129,7 +130,19 @@ class MarkdownFiles:
                     with path.open("x", encoding="utf-8", newline="\n") as output:
                         output.write(text)
                 else:
-                    os.replace(temporary, path)
+                    # A Windows reader or antivirus can briefly hold a handle that
+                    # denies rename. Retry in the worker, checking CAS and boundaries
+                    # each time so a real external edit is never hidden by the wait.
+                    for attempt in range(6):
+                        if self.read(relative) != expected:
+                            raise UserError("文件在保存期间发生变化，请刷新后重试。")
+                        try:
+                            os.replace(temporary, path)
+                            break
+                        except PermissionError as exc:
+                            if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 5:
+                                raise
+                            time.sleep(.05)
             finally:
                 temporary.unlink(missing_ok=True)
         return {"path": str(path)}
