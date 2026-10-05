@@ -273,6 +273,8 @@ class WorkbenchUITests(unittest.TestCase):
         with patch.object(CatalogDialog, "exec", fill):
             page.edit_item(None)
         self.until(lambda: page.listing.count() == 2)
+        self.assertEqual(page.selected()["name"], "项目专属 Skill")
+        self.assertIn("项目专属 Skill", page.preview.toPlainText())
         entry = next(i for i in page.items if i["name"] == "项目专属 Skill")
         self.assertEqual(entry["metadata"]["projects"], [self.project["project_id"]])
         page.search.setText("找不到")

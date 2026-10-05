@@ -718,6 +718,8 @@ class CatalogPage(MarkdownPage):
     def render(self, *_):
         selected = self.selected()
         identity = selected["id"] if selected else ""
+        preferred = getattr(self, "preferred_path", "")
+        preferred_item = None
         self.listing.blockSignals(True)
         self.listing.clear()
         query, kind = self.search.text().casefold().strip(), self.kind.currentData()
@@ -736,6 +738,11 @@ class CatalogPage(MarkdownPage):
             self.listing.addItem(cell)
             if entry["id"] == identity:
                 self.listing.setCurrentItem(cell)
+            if entry["path"] == preferred:
+                preferred_item = cell
+        if preferred_item is not None:
+            self.listing.setCurrentItem(preferred_item)
+            self.preferred_path = ""
         if self.listing.currentRow() < 0 and self.listing.count():
             self.listing.setCurrentRow(0)
         self.listing.blockSignals(False)
@@ -787,7 +794,8 @@ class CatalogPage(MarkdownPage):
             self.search.clear()
             self.kind.setCurrentIndex(0)
             self.favorite.setChecked(False)
-        def saved(_):
+        def saved(report):
+            self.preferred_path = report["path"]
             self.refresh()
             if on_saved:
                 on_saved()
@@ -992,7 +1000,10 @@ class AgentPage(QWidget):
                 dialog.fields["agents"].setText(resource.id)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     metadata, body = dialog.metadata(), dialog.body.toPlainText()
-                    self.window.submit(None, "保存 Agent 备注 Markdown", lambda context: catalog.save(metadata, body), lambda _: self.resources(), persist_result=False)
+                    def saved(report):
+                        page.preferred_path = report["path"]
+                        self.resources()
+                    self.window.submit(None, "保存 Agent 备注 Markdown", lambda context: catalog.save(metadata, body), saved, persist_result=False)
         self.window.submit(None, "定位 Agent 备注", catalog.scan, loaded, persist_result=False)
 
     def safety(self):
