@@ -85,6 +85,15 @@ QWidget#SettingsPage QLineEdit, QWidget#SettingsPage QSpinBox { border-radius: 3
 QWidget#SettingsPage QTextEdit { border-radius: 3px; padding: 8px; }
 QWidget#SettingsPage QToolButton { border: none; background: transparent; padding: 6px 0px; color: #4d5b76; }
 QWidget#SettingsPage QToolButton:hover { color: #26334f; }
+QFrame#SettingsCard { background: #ffffff; border: 1px solid #e8edf5; border-radius: 12px; }
+QLabel#SettingsIcon { background: #edf4ff; color: #3979ff; border-radius: 12px; font-size: 22px; font-weight: 600; }
+QLabel#SettingsCardTitle { color: #20385e; font-size: 16px; font-weight: 650; }
+QWidget#SettingsStatusPanel QLabel#SettingsStatusTile { background: #f6f8fc; border: 1px solid #edf1f7; border-radius: 10px; padding: 12px; color: #425776; }
+QWidget#SettingsPage QPushButton { border-radius: 8px; padding: 8px 13px; }
+QWidget#SettingsPage QPushButton[primary="true"] { background: #3979ff; border-color: #3979ff; color: #ffffff; }
+QWidget#SettingsPage QPushButton[primary="true"]:hover { background: #2866e8; }
+QWidget#SettingsPage QLineEdit, QWidget#SettingsPage QSpinBox { border-radius: 7px; padding: 8px; }
+QWidget#SettingsPage QToolButton { border-radius: 6px; padding: 7px 9px; }
 QPushButton#SidebarHelp { background: transparent; color: #b3bdd5; border: 1px solid #34405c; border-radius: 3px; padding: 6px; }
 QPushButton#SidebarHelp:hover { background: #222d4b; color: #ffffff; }
 QWidget#TodayPage, QWidget#TodayBody { background: transparent; }
@@ -127,4 +136,19 @@ QWidget#AgentPage QListWidget#AgentListing::item:selected { background: #edf4ff;
 QWidget#AgentPage QListWidget#AgentCompactList { border: none; background: transparent; }
 QWidget#AgentPage QListWidget#AgentCompactList::item { padding: 7px 8px; border-bottom: 1px solid #eef1f6; }
 QWidget#AgentPage QTabBar::tab { padding: 10px 15px; }
+QWidget#CatalogPage { background: #f5f6fb; }
+QWidget#CatalogPage QFrame#Card { border-radius: 12px; }
+QWidget#CatalogSidePanel, QWidget#CatalogDetail { background: #ffffff; border: 1px solid #e8edf5; border-radius: 12px; }
+QListWidget#CatalogFilterList { border: none; border-radius: 8px; background: transparent; }
+QListWidget#CatalogFilterList::item { padding: 8px 9px; margin: 1px 0; border: none; border-radius: 7px; }
+QListWidget#CatalogFilterList::item:selected { background: #edf4ff; color: #2866d7; }
+QListWidget#CatalogResourceList { border: none; background: transparent; }
+QListWidget#CatalogResourceList::item { padding: 10px 12px; margin: 2px 0; border: 1px solid transparent; border-radius: 9px; }
+QListWidget#CatalogResourceList::item:selected { background: #eef5ff; border-color: #a9c8ff; color: #173b78; }
+QLabel#CatalogDetailIcon { background: #edf4ff; color: #3979ff; border-radius: 13px; font-size: 25px; font-weight: 650; }
+QLabel#CatalogDetailTitle { color: #172b52; font-size: 20px; font-weight: 700; }
+QLabel#CatalogDetailFacts { color: #607493; line-height: 1.5; }
+QTextBrowser#CatalogBodyPreview { background: transparent; border: none; padding: 4px 2px; color: #364d70; }
+QWidget#CatalogPage QLineEdit, QWidget#CatalogPage QComboBox { min-height: 22px; }
+QWidget#CatalogPage QPushButton { padding: 8px 12px; }
 """

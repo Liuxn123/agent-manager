@@ -692,19 +692,35 @@ class CatalogDialog(QDialog):
 class CatalogPage(MarkdownPage):
     def __init__(self, window):
         super().__init__(window)
+        self.setObjectName("CatalogPage")
         self.catalog, self.items, self.project_filter, self.agent_filter = Catalog(work_root(window.store)), [], "", ""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 18)
+        layout.setSpacing(10)
         heading = QLabel("资源库")
         heading.setObjectName("Title")
-        layout.addWidget(heading)
+        heading_row = QHBoxLayout()
+        heading_row.addWidget(heading, 1)
+        heading_row.addWidget(control("＋ 收藏新资源", lambda: self.edit_item(None), True))
+        layout.addLayout(heading_row)
         note = QLabel("把 Prompt、Skill、MCP 和常用资料放在一起。先收藏、整理和找到；正文由 Markdown 保存。")
         note.setWordWrap(True)
         note.setObjectName("Subtitle")
         layout.addWidget(note)
+
+        self.metrics = [Metric(title, color, icon, hint) for title, color, icon, hint in (
+            ("Prompt", COLORS[0], 15, "提示词模板与指令"), ("Skill", COLORS[3], 6, "可复用的技能"),
+            ("MCP", COLORS[0], 7, "模型上下文协议"), ("收藏", COLORS[2], 14, "我收藏的资源"))]
+        metric_row = QHBoxLayout()
+        metric_row.setSpacing(8)
+        for metric in self.metrics:
+            metric_row.addWidget(metric, 1)
+        layout.addLayout(metric_row)
+
         row = QHBoxLayout()
-        row.addWidget(control("收藏新资源", lambda: self.edit_item(None), True))
         self.search = QLineEdit()
-        self.search.setPlaceholderText("搜索名称、标签、用途和正文")
+        self.search.setPlaceholderText("搜索资源名称、标签、用途和正文…")
+        self.search.setMinimumWidth(200)
         self.search.textChanged.connect(self.render)
         row.addWidget(self.search, 1)
         self.kind = QComboBox()
@@ -713,6 +729,14 @@ class CatalogPage(MarkdownPage):
             self.kind.addItem(label, key)
         self.kind.currentIndexChanged.connect(self.render)
         row.addWidget(self.kind)
+        self.project_choice = QComboBox()
+        self.project_choice.addItem("全部项目", "")
+        self.project_choice.currentIndexChanged.connect(self.change_project_filter)
+        row.addWidget(self.project_choice)
+        self.tag_choice = QComboBox()
+        self.tag_choice.addItem("全部标签", "")
+        self.tag_choice.currentIndexChanged.connect(self.render)
+        row.addWidget(self.tag_choice)
         self.favorite = QCheckBox("只看收藏")
         self.favorite.toggled.connect(self.render)
         row.addWidget(self.favorite)
@@ -720,15 +744,85 @@ class CatalogPage(MarkdownPage):
         layout.addLayout(row)
         self.scope = QLabel()
         self.scope.setWordWrap(True)
+        self.scope.setObjectName("Subtitle")
         layout.addWidget(self.scope)
+
         split = QSplitter(Qt.Orientation.Horizontal)
+        split.setChildrenCollapsible(False)
+        categories = QWidget()
+        categories.setObjectName("CatalogSidePanel")
+        side_layout = QVBoxLayout(categories)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(8)
+        side_title = QLabel("资源分类")
+        side_title.setObjectName("SectionTitle")
+        side_layout.addWidget(side_title)
+        self.category_list = QListWidget()
+        self.category_list.setObjectName("CatalogFilterList")
+        self.category_list.currentItemChanged.connect(self.select_category)
+        side_layout.addWidget(self.category_list, 2)
+        project_title = QLabel("项目筛选")
+        project_title.setObjectName("SectionTitle")
+        side_layout.addWidget(project_title)
+        self.project_list = QListWidget()
+        self.project_list.setObjectName("CatalogFilterList")
+        self.project_list.currentItemChanged.connect(self.select_project)
+        side_layout.addWidget(self.project_list, 1)
+        split.addWidget(categories)
+
+        listing_panel = QWidget()
+        list_layout = QVBoxLayout(listing_panel)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_head = QHBoxLayout()
+        self.list_title = QLabel("资源列表（0）")
+        self.list_title.setObjectName("SectionTitle")
+        list_head.addWidget(self.list_title, 1)
+        self.sort_choice = QComboBox()
+        for title, value in (("最近更新", "updated"), ("名称 A–Z", "name"), ("收藏优先", "favorite")):
+            self.sort_choice.addItem(title, value)
+        self.sort_choice.currentIndexChanged.connect(self.render)
+        list_head.addWidget(self.sort_choice)
+        list_layout.addLayout(list_head)
         self.listing = QListWidget()
+        self.listing.setObjectName("CatalogResourceList")
         self.listing.setWordWrap(True)
+        self.listing.setSpacing(4)
         self.listing.currentItemChanged.connect(self.selected_changed)
-        split.addWidget(self.listing)
+        list_layout.addWidget(self.listing, 1)
+        split.addWidget(listing_panel)
+
         preview = QWidget()
+        preview.setObjectName("CatalogDetail")
         pane = QVBoxLayout(preview)
-        pane.setContentsMargins(6, 0, 0, 0)
+        pane.setContentsMargins(12, 0, 0, 0)
+        pane.setSpacing(8)
+        detail_header = QHBoxLayout()
+        self.detail_icon = QLabel("◇")
+        self.detail_icon.setObjectName("CatalogDetailIcon")
+        self.detail_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.detail_icon.setFixedSize(54, 54)
+        detail_header.addWidget(self.detail_icon)
+        title_column = QVBoxLayout()
+        self.detail_title = QLabel("选择一个资源")
+        self.detail_title.setObjectName("CatalogDetailTitle")
+        self.detail_type = QLabel("收藏、整理和查找常用资料")
+        self.detail_type.setObjectName("Subtitle")
+        title_column.addWidget(self.detail_title)
+        title_column.addWidget(self.detail_type)
+        detail_header.addLayout(title_column, 1)
+        self.detail_favorite = control("☆", self.toggle_favorite)
+        self.detail_favorite.setToolTip("收藏 / 取消收藏")
+        detail_header.addWidget(self.detail_favorite)
+        pane.addLayout(detail_header)
+        self.detail_facts = QLabel("")
+        self.detail_facts.setObjectName("CatalogDetailFacts")
+        self.detail_facts.setWordWrap(True)
+        self.detail_facts.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        pane.addWidget(self.detail_facts)
+        self.detail_summary = QLabel("")
+        self.detail_summary.setObjectName("Subtitle")
+        self.detail_summary.setWordWrap(True)
+        pane.addWidget(self.detail_summary)
         actions = FlowLayout()
         self.edit_button = control("编辑资源", lambda: self.edit_item(self.selected()))
         actions.addWidget(self.edit_button)
@@ -743,11 +837,12 @@ class CatalogPage(MarkdownPage):
         actions.addWidget(control("显示全部资源", self.clear_scope))
         pane.addLayout(actions)
         self.preview = QTextBrowser()
+        self.preview.setObjectName("CatalogBodyPreview")
         self.preview.setOpenExternalLinks(False)
         self.preview.anchorClicked.connect(self.safe_url)
         pane.addWidget(self.preview, 1)
         split.addWidget(preview)
-        split.setSizes([330, 660])
+        split.setSizes([235, 405, 670])
         layout.addWidget(split, 1)
         self.message = QLabel()
         self.message.setWordWrap(True)
@@ -765,9 +860,90 @@ class CatalogPage(MarkdownPage):
 
     def loaded(self, report):
         self.items = report["items"]
+        self.rebuild_filters()
         self.message.setText("；".join(report["errors"]) if report["errors"] else f"{len(self.items)} 个资源 · 正文保存为 Markdown，与 Obsidian 使用同一份文件。")
         self.render()
         self.watch([str(self.catalog.files.root), str(self.catalog.files.root / "资源"), *[i["path"] for i in self.items]])
+
+    def rebuild_filters(self):
+        tags = sorted({str(tag) for item in self.items for tag in item["metadata"].get("tags", [])}, key=str.casefold)
+        self.tag_choice.blockSignals(True)
+        selected_tag = self.tag_choice.currentData()
+        self.tag_choice.clear(); self.tag_choice.addItem("全部标签", "")
+        for tag in tags:
+            self.tag_choice.addItem(tag, tag)
+        self.tag_choice.setCurrentIndex(max(0, self.tag_choice.findData(selected_tag)))
+        self.tag_choice.blockSignals(False)
+
+        projects = sorted({str(project) for item in self.items for project in item["metadata"].get("projects", [])}, key=str.casefold)
+        names = {r.id: r.name for r in self.window.store.resources() if r.kind in {"project", "vault"}}
+        self.project_choice.blockSignals(True)
+        selected_project = self.project_filter
+        self.project_choice.clear(); self.project_choice.addItem("全部项目", "")
+        for project in projects:
+            self.project_choice.addItem(names.get(project, project), project)
+        self.project_choice.setCurrentIndex(max(0, self.project_choice.findData(selected_project)))
+        self.project_choice.blockSignals(False)
+
+        counts = {kind: sum(item["type"] == kind for item in self.items) for kind in TYPES}
+        favorite_count = sum(bool(item["metadata"].get("favorite")) for item in self.items)
+        for metric, value in zip(self.metrics, (counts.get("prompt", 0), counts.get("skill", 0), counts.get("mcp", 0), favorite_count)):
+            metric.value.setText(str(value))
+
+        self.category_list.blockSignals(True)
+        self.category_list.clear()
+        rows = [("全部资源", "type", "", len(self.items))]
+        rows.extend((TYPES[kind], "type", kind, counts[kind]) for kind in TYPES)
+        rows.append(("收藏", "favorite", "favorite", favorite_count))
+        selected_category = ("favorite", "favorite") if self.favorite.isChecked() else ("type", self.kind.currentData() or "")
+        for title, group, value, count in rows:
+            cell = QListWidgetItem(f"{title}     {count}")
+            cell.setData(Qt.ItemDataRole.UserRole, (group, value))
+            self.category_list.addItem(cell)
+            if (group, value) == selected_category:
+                self.category_list.setCurrentItem(cell)
+        self.category_list.blockSignals(False)
+
+        self.project_list.blockSignals(True)
+        self.project_list.clear()
+        row = QListWidgetItem("全部项目")
+        row.setData(Qt.ItemDataRole.UserRole, "")
+        self.project_list.addItem(row)
+        if not self.project_filter:
+            self.project_list.setCurrentItem(row)
+        for project in projects:
+            count = sum(project in item["metadata"].get("projects", []) for item in self.items)
+            cell = QListWidgetItem(f"{names.get(project, project)}   {count}")
+            cell.setData(Qt.ItemDataRole.UserRole, project)
+            self.project_list.addItem(cell)
+            if project == self.project_filter:
+                self.project_list.setCurrentItem(cell)
+        self.project_list.blockSignals(False)
+
+    def change_project_filter(self, *_):
+        self.project_filter = self.project_choice.currentData() or ""
+        self.render()
+
+    def select_category(self, current, _previous=None):
+        if current is None:
+            return
+        group, value = current.data(Qt.ItemDataRole.UserRole)
+        self.kind.blockSignals(True)
+        self.favorite.blockSignals(True)
+        self.kind.setCurrentIndex(max(0, self.kind.findData(value if group == "type" else "")))
+        self.favorite.setChecked(group == "favorite")
+        self.kind.blockSignals(False)
+        self.favorite.blockSignals(False)
+        self.render()
+
+    def select_project(self, current, _previous=None):
+        if current is None:
+            return
+        self.project_filter = current.data(Qt.ItemDataRole.UserRole) or ""
+        self.project_choice.blockSignals(True)
+        self.project_choice.setCurrentIndex(max(0, self.project_choice.findData(self.project_filter)))
+        self.project_choice.blockSignals(False)
+        self.render()
 
     def render(self, *_):
         selected = self.selected()
@@ -776,7 +952,8 @@ class CatalogPage(MarkdownPage):
         preferred_item = None
         self.listing.blockSignals(True)
         self.listing.clear()
-        query, kind = self.search.text().casefold().strip(), self.kind.currentData()
+        query, kind, tag = self.search.text().casefold().strip(), self.kind.currentData(), self.tag_choice.currentData()
+        entries = []
         for entry in self.items:
             metadata = entry["metadata"]
             if kind and entry["type"] != kind or self.favorite.isChecked() and not metadata.get("favorite"):
@@ -785,9 +962,28 @@ class CatalogPage(MarkdownPage):
                 continue
             if self.agent_filter and not self.matches_agent(metadata.get("agents", [])):
                 continue
+            if tag and tag not in metadata.get("tags", []):
+                continue
             if query and query not in (entry["name"] + " " + str(metadata) + " " + entry["body"]).casefold():
                 continue
-            cell = QListWidgetItem(("★ " if metadata.get("favorite") else "") + entry["name"] + "\n" + TYPES[entry["type"]] + " · " + ", ".join(metadata.get("tags", [])))
+            entries.append(entry)
+        sort_mode = self.sort_choice.currentData()
+        if sort_mode == "name":
+            entries.sort(key=lambda entry: entry["name"].casefold())
+        elif sort_mode == "favorite":
+            entries.sort(key=lambda entry: (not bool(entry["metadata"].get("favorite")), entry["name"].casefold()))
+        else:
+            entries.sort(key=lambda entry: str(entry["metadata"].get("updated", "")), reverse=True)
+        for entry in entries:
+            metadata = entry["metadata"]
+            summary = str(metadata.get("summary", "")).replace("\n", " ").strip()
+            tags = " · ".join(str(tag) for tag in metadata.get("tags", [])[:3])
+            agent = ", ".join(metadata.get("agents", [])[:1])
+            configured = "已配置" if metadata.get("configured") else "未配置"
+            detail = "  ·  ".join(value for value in (TYPES[entry["type"]], tags, agent, configured) if value)
+            cell = QListWidgetItem(("★  " if metadata.get("favorite") else "") + entry["name"] + "\n" + (summary[:76] + ("…" if len(summary) > 76 else "") if summary else detail) + "\n" + detail)
+            cell.setSizeHint(QSize(340, 82))
+            cell.setToolTip(entry["name"] + "\n" + (summary or detail))
             cell.setData(Qt.ItemDataRole.UserRole, entry)
             self.listing.addItem(cell)
             if entry["id"] == identity:
@@ -800,8 +996,27 @@ class CatalogPage(MarkdownPage):
         if self.listing.currentRow() < 0 and self.listing.count():
             self.listing.setCurrentRow(0)
         self.listing.blockSignals(False)
+        self.list_title.setText(f"资源列表（{len(entries)}）")
         self.scope.setText("当前筛选：" + (self.project_filter or self.agent_filter) if self.project_filter or self.agent_filter else "")
+        self.sync_filter_selection()
         self.selected_changed()
+
+    def sync_filter_selection(self):
+        selected_category = ("favorite", "favorite") if self.favorite.isChecked() else ("type", self.kind.currentData() or "")
+        self.category_list.blockSignals(True)
+        for index in range(self.category_list.count()):
+            item = self.category_list.item(index)
+            if item.data(Qt.ItemDataRole.UserRole) == selected_category:
+                self.category_list.setCurrentItem(item)
+                break
+        self.category_list.blockSignals(False)
+        self.project_list.blockSignals(True)
+        for index in range(self.project_list.count()):
+            item = self.project_list.item(index)
+            if (item.data(Qt.ItemDataRole.UserRole) or "") == self.project_filter:
+                self.project_list.setCurrentItem(item)
+                break
+        self.project_list.blockSignals(False)
 
     def project_resource_ids(self):
         return getattr(self, "related_ids", [])
@@ -810,7 +1025,7 @@ class CatalogPage(MarkdownPage):
         resource = next((r for r in self.window.store.resources() if r.id == self.agent_filter), None)
         keys = {self.agent_filter.casefold()}
         if resource:
-            engine = resource.options.get("engine", "hermes")
+            engine = str(resource.options.get("engine") or "hermes")
             keys.update({engine.casefold(), engine.casefold().replace(" ", "-")})
             if engine == "Claude Code":
                 keys.add("claude")
@@ -822,15 +1037,47 @@ class CatalogPage(MarkdownPage):
 
     def selected_changed(self, *_):
         item = self.selected()
-        for widget in (self.edit_button, self.favorite_button, self.obsidian_button, self.local_button):
+        for widget in (self.edit_button, self.favorite_button, self.obsidian_button, self.local_button, self.detail_favorite):
             widget.setEnabled(item is not None)
         self.source_button.setEnabled(bool(item and item["metadata"].get("source")))
         if not item:
+            self.detail_title.setText("选择一个资源")
+            self.detail_type.setText("收藏、整理和查找常用资料")
+            self.detail_icon.setText("◇")
+            self.detail_facts.clear()
+            self.detail_summary.clear()
             self.preview.setPlainText("还没有匹配资源。点击“收藏新资源”，或将带 frontmatter 的 Markdown 放入工作台的“资源”文件夹。")
             return
         metadata = item["metadata"]
-        status = " · ".join(label + ("：是" if metadata.get(key) else "：否") for key, label in (("configured", "已配置"), ("tested", "已测试")))
-        text = "# " + item["name"] + "\n\n" + str(metadata.get("summary", "")) + "\n\n" + status + "\n\n" + item["body"]
+        config_state = "已配置" if metadata.get("configured") else "未配置"
+        test_state = "已测试" if metadata.get("tested") else "未测试"
+        self.detail_title.setText(item["name"])
+        self.detail_type.setText(TYPES.get(item["type"], item["type"]) + "  ·  " + "、".join(metadata.get("tags", [])))
+        icons = {"prompt": "▤", "skill": "⬡", "mcp": "↔", "agent": "♙", "tool": "⚒", "website": "◎", "github": "⌘", "article": "▧", "template": "▣"}
+        self.detail_icon.setText(icons.get(item["type"], "◇"))
+        self.detail_favorite.setText("★" if metadata.get("favorite") else "☆")
+        self.favorite_button.setText("取消收藏" if metadata.get("favorite") else "收藏资源")
+        resources = self.window.store.resources()
+        names = {r.id: r.name for r in resources}
+        names.update({str(r.options.get("engine") or "").casefold(): r.name for r in resources if r.kind in {"agent", "hermes_local", "hermes_server"}})
+        projects = [names.get(value, value) for value in metadata.get("projects", [])]
+        agents = [names.get(value, value) for value in metadata.get("agents", [])]
+        file_size = ""
+        try:
+            file_size = f"{Path(item['path']).stat().st_size / 1024:.1f} KB"
+        except OSError:
+            pass
+        facts = [f"状态：{config_state} · {test_state}",
+                 "所属项目：" + ("、".join(projects) if projects else "默认项目"),
+                 "关联 Agent：" + ("、".join(agents) if agents else "未指定"),
+                 "来源链接：" + str(metadata.get("source") or "未填写"),
+                 "本地目录：" + str(metadata.get("local_path") or Path(item["path"]).parent),
+                 "最后更新：" + str(metadata.get("updated") or "未注明")]
+        if file_size:
+            facts.append("文件大小：" + file_size)
+        self.detail_facts.setText("\n".join(facts))
+        self.detail_summary.setText(str(metadata.get("summary", "")) or "未填写简介。")
+        text = "## 资源正文\n\n" + item["body"]
         if metadata.get("notes"):
             text += "\n\n## 我的备注\n\n" + str(metadata["notes"])
         self.preview.setMarkdown(text)
@@ -884,6 +1131,10 @@ class CatalogPage(MarkdownPage):
         self.search.clear()
         self.kind.setCurrentIndex(0)
         self.favorite.setChecked(False)
+        self.tag_choice.setCurrentIndex(0)
+        self.project_choice.blockSignals(True)
+        self.project_choice.setCurrentIndex(max(0, self.project_choice.findData(project)))
+        self.project_choice.blockSignals(False)
         self.render()
 
     def clear_scope(self):

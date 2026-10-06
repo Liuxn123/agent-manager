@@ -1248,6 +1248,8 @@ class MainWindow(QMainWindow):
     def refresh_common_password(self) -> None:
         if hasattr(self, "common_password_status"):
             self.common_password_status.setText("已输入 · 本次打开期间，所有新建 .amb 备份共用它" if self.service.common_password else "尚未输入 · 第一次备份时也可以设置")
+        if hasattr(self, "settings_status_update"):
+            self.settings_status_update()
 
     def set_common_password(self) -> None:
         supplied = self.password_input(True)
@@ -1601,6 +1603,8 @@ class MainWindow(QMainWindow):
         self.store.set_setting("backup_keep", self.backup_keep.value())
         self.backup_path.setText(str(self.service.backup_root()))
         self.backup_location.setPlainText(str(self.service.backup_root()))
+        if hasattr(self, "settings_status_update"):
+            self.settings_status_update()
         self.statusBar().showMessage("设置已保存")
 
     def change_backup_location(self) -> None:

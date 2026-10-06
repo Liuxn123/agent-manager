@@ -16,7 +16,7 @@ from agent_manager.domain import Resource
 from agent_manager.storage import Store
 from agent_manager.runtime import TaskContext
 from agent_manager.project_workspaces import ProjectWorkspace
-from agent_manager.workbench import Daily, Catalog, work_root, project_context, summaries
+from agent_manager.workbench import Daily, Catalog, TYPES, work_root, project_context, summaries
 from agent_manager.ui.window import MainWindow
 from agent_manager.ui.workbench import CatalogDialog
 from agent_manager.ui.agenda import AgendaPanel
@@ -183,6 +183,24 @@ class WorkbenchUITests(unittest.TestCase):
         self.until(lambda: any("外部新配置" in i["body"] for i in page.items))
         self.assertNotIn("fixture-private-resource-body", str(self.store.tasks()))
         self.assertNotIn(b"fixture-private-resource-body", self.store.path.read_bytes())
+
+    def test_library_filter_detail_and_settings_status_are_connected(self):
+        self.window.navigation.setCurrentRow(self.window.LIBRARY)
+        page = self.window.catalog_page
+        self.until(lambda: len(page.items) == 1)
+        self.assertEqual(page.category_list.count(), len(TYPES) + 2)
+        self.assertEqual(page.listing.count(), 1)
+        self.assertIn("阶段总结 Prompt", page.detail_title.text())
+        self.assertIn("关联 Agent", page.detail_facts.text())
+
+        self.window.navigation.setCurrentRow(self.window.SETTINGS)
+        self.assertEqual(self.window.stack.currentWidget().objectName(), "SettingsPage")
+        destination = self.root / "future-backups"
+        self.window.backup_path.setText(str(destination))
+        self.window.save_settings()
+        self.assertEqual(Path(self.store.setting("backup_root")), destination.resolve())
+        self.assertIn("首次备份时创建", self.window.settings_backup_status.text())
+        self.assertEqual(Path(self.window.backup_location.toPlainText()), destination.resolve())
 
     def test_existing_agent_opens_same_safety_registration_and_daily_has_no_backup_controls(self):
         self.window.navigation.setCurrentRow(self.window.AGENT)

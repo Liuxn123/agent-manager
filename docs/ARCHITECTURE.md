@@ -1,4 +1,6 @@
-# Agent 管家 v0.8.1 架构
+# Agent 管家 v0.8.2 架构
+
+v0.8.2 资源库页面重排为筛选 / 列表 / 详情三栏，筛选状态仍来自 `Catalog` 扫描的 Markdown frontmatter，不增加 SQLite 正文或索引字段；设置页以卡片展示资料目录、备份目录和密码状态，既有保存处理与数据路径保持不变。
 
 v0.8.0 项目归档 / 重新启用通过带管理锁的 `ProjectWorkspace.set_archived` 修改 STATUS 状态，不移动项目目录、不改变 projects.json 路径或 Obsidian 联接。Frontmatter 的 `archived_from` 暂存归档前状态，重新启用时恢复；旧归档缺少该字段时回到 active。项目归类、索引和工作台过滤均读取 STATUS lifecycle，因此兼容仍位于旧 `archive/` 目录的编号项目。旧移动方法保留供兼容，不再由此 UI 流程调用。
 
