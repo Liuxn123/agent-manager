@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from PySide6.QtCore import Qt, QSize, QRect, QEvent, QDate
 from PySide6.QtGui import QColor, QFont, QPen
@@ -155,7 +156,7 @@ class TodayDelegate(QStyledItemDelegate):
             painter.drawEllipse(rect.x() + 5, rect.center().y() - 4, 8, 8)
             self.text(painter, QRect(rect.x() + 24, rect.y() + 6, rect.width() - 32, 19), clock, COLORS[0], size=11)
             self.text(painter, QRect(rect.x() + 24, rect.y() + 26, rect.width() - 32, 22), title, "#263c60", True)
-        elif self.kind in {"task", "focus"}:
+        elif self.kind in {"task", "focus", "todo"}:
             details = task_details(data["text"])
             checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked.value
             x = rect.x() + 6
@@ -168,12 +169,20 @@ class TodayDelegate(QStyledItemDelegate):
                     painter.setPen(QPen(QColor("white"), 2))
                     painter.drawLine(box.x() + 3, box.y() + 8, box.x() + 7, box.y() + 12)
                     painter.drawLine(box.x() + 7, box.y() + 12, box.x() + 13, box.y() + 4)
-            else:
+            elif self.kind == "focus":
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(COLORS[data.get("position", 0) % 4]))
                 painter.drawEllipse(x, rect.center().y() - 9, 18, 18)
                 self.text(painter, QRect(x + 5, rect.y(), 15, rect.height()), str(data.get("position", 0) + 1), "white", True, 11)
             end = rect.right() - 5
+            if self.kind == "todo":
+                badge = QRect(end - 78, rect.center().y() - 10, 78, 20)
+                overdue = data.get("day", "") < date.today().isoformat()
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#fff0ef" if overdue else "#edf4ff"))
+                painter.drawRoundedRect(badge, 9, 9)
+                self.text(painter, badge.adjusted(5, 0, -5, 0), data.get("day", "")[5:] + ("逾期" if overdue else "截止"), "#c04f4b" if overdue else COLORS[0], size=10)
+                end -= 85
             if details["time"]:
                 self.text(painter, QRect(end - 42, rect.y(), 42, rect.height()), details["time"], "#7e8ba3", size=11)
                 end -= 53
@@ -212,25 +221,27 @@ class TodayDelegate(QStyledItemDelegate):
 class DailyEntryDialog(QDialog):
     def __init__(self, parent, section, day=None):
         super().__init__(parent)
-        self.setWindowTitle("添加任务" if section == "今日任务" else "添加日程")
+        is_task = section in {"今日任务", "Todo"}
+        self.setWindowTitle("添加 Todo" if section == "Todo" else "添加任务" if is_task else "添加日程")
         self.resize(480, 230)
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.date = QDateEdit(QDate(day.year, day.month, day.day) if day else QDate.currentDate())
         self.date.setCalendarPopup(True)
         self.date.setDisplayFormat("yyyy-MM-dd")
-        form.addRow("哪一天", self.date)
+        form.addRow("截止日期" if section == "Todo" else "哪一天", self.date)
         self.title = QLineEdit()
         self.title.setMaxLength(240)
         self.title.setPlaceholderText("例如：验证 Hermes 恢复")
         form.addRow("做什么", self.title)
         self.priority = QComboBox()
         self.priority.addItems(["普通", "高", "中", "低"])
-        if section == "今日任务":
+        if is_task:
             form.addRow("优先级", self.priority)
         self.time = QLineEdit()
-        self.time.setPlaceholderText("可选，例如 09:00" + ("–10:00" if section == "日程" else ""))
-        form.addRow("时间", self.time)
+        if not is_task:
+            self.time.setPlaceholderText("可选，例如 09:00–10:00")
+            form.addRow("时间", self.time)
         layout.addLayout(form)
         layout.addWidget(label("保存到所选日期的 Markdown，与 Obsidian 共用。", "TodayMuted"))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)

@@ -16,7 +16,7 @@ from ..domain import UserError
 from ..project_workspaces import ProjectWorkspace
 from ..runtime import TaskContext
 from ..storage import now
-from ..workbench import Daily, Catalog, TYPES, work_root, markdown_uri, project_context, task_details
+from ..workbench import Agenda, Daily, Catalog, TYPES, work_root, markdown_uri, project_context, task_details
 from .components import FlowLayout
 from .tasks import ReadWorker
 from .presentation import readable_time
@@ -143,6 +143,8 @@ class TodayPage(MarkdownPage):
         self.day, self.report, self.projects = date.today(), None, []
         self.actual_today = self.day
         self.project_errors = []
+        self.todo_index = None
+        self.todo_root = None
         self.focus_elapsed, self.focus_started = 0.0, None
         self.narrow = None
         layout = QVBoxLayout(self)
@@ -197,12 +199,17 @@ class TodayPage(MarkdownPage):
             column.setContentsMargins(0, 0, 0, 0)
             column.setSpacing(12)
 
-        self.focus_card = Section("今日重点", 15, "添加任务 ＋", lambda: self.add_entry("今日任务"))
-        self.focus_items = TodayList("focus")
-        self.focus_items.itemDoubleClicked.connect(lambda item: self.edit_today())
-        self.focus_card.body.addWidget(self.focus_items)
-        left.addWidget(self.focus_card)
-        self.task_card = Section("今日任务", 9, "添加任务 ＋", lambda: self.add_entry("今日任务"))
+        self.todo_card = Section("Todo", 15, "添加 Todo ＋", lambda: self.add_entry("Todo"))
+        self.todo_status = label("未完成事项按截止日期排列。", "TodayMuted")
+        self.todo_status.setWordWrap(True)
+        self.todo_card.body.addWidget(self.todo_status)
+        self.todo_items = TodayList("todo")
+        self.todo_items.itemDoubleClicked.connect(self.open_todo)
+        self.todo_items.addItem("暂无其他待办。添加 Todo 可设置截止日期。")
+        self.todo_items.fit(4)
+        self.todo_card.body.addWidget(self.todo_items)
+        left.addWidget(self.todo_card)
+        self.task_card = Section("今日要做", 9, "添加任务 ＋", lambda: self.add_entry("今日任务"))
         self.tasks = TodayList("task")
         self.tasks.itemChanged.connect(self.toggle_task)
         self.tasks.itemDoubleClicked.connect(lambda item: self.edit_today())
@@ -212,11 +219,6 @@ class TodayPage(MarkdownPage):
         self.daily_hint.setWordWrap(True)
         self.task_card.body.addWidget(self.daily_hint)
         left.addWidget(self.task_card)
-        self.schedule_card = Section("时间轴日程", 8, "添加日程 ＋", lambda: self.add_entry("日程"))
-        self.schedule = TodayList("schedule")
-        self.schedule.itemDoubleClicked.connect(lambda item: self.edit_today())
-        self.schedule_card.body.addWidget(self.schedule)
-        left.addWidget(self.schedule_card)
         quick = Section("快捷操作", 14)
         actions = FlowLayout()
         for title, action, color in (
@@ -313,7 +315,9 @@ class TodayPage(MarkdownPage):
         if not self.report:
             return
         expected, daily = self.report["original"], self.daily()
-        dialog = DailyEntryDialog(parent or self, section, day or self.day)
+        is_todo = section == "Todo"
+        entry_section = "今日任务" if is_todo else section
+        dialog = DailyEntryDialog(parent or self, section, day or (date.today() if is_todo else self.day))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             title, priority, clock = dialog.values()
             target_day = dialog.date.date().toPython()
@@ -321,9 +325,9 @@ class TodayPage(MarkdownPage):
             def append(context):
                 snapshot = expected if target_day == daily.day else target.load()["original"]
                 context.checkpoint()
-                return target.add_entry(section, title, snapshot, priority, clock)
-            self.window.submit(None, "添加" + ("任务" if section == "今日任务" else "日程"),
-                append, lambda _: self.set_day(target_day), persist_result=False)
+                return target.add_entry(entry_section, title, snapshot, priority, clock)
+            self.window.submit(None, "添加 Todo" if is_todo else "添加" + ("任务" if section == "今日任务" else "日程"),
+                append, lambda _: self.refresh() if is_todo else self.set_day(target_day), persist_result=False)
 
     def set_day(self, day):
         if day != self.day:
@@ -335,8 +339,7 @@ class TodayPage(MarkdownPage):
             self.tasks.clear()
             self.tasks.blockSignals(False)
             self.tasks.addItem("正在读取所选日期…")
-            self.focus_items.clear()
-            self.schedule.clear()
+            self.todo_items.clear()
         self.date_picker.blockSignals(True)
         self.date_picker.setDate(QDate(day.year, day.month, day.day))
         self.date_picker.blockSignals(False)
@@ -389,15 +392,22 @@ class TodayPage(MarkdownPage):
         is_today = self.day == date.today()
         self.edit_button.setText("编辑今日计划" if is_today else "编辑当日计划")
         self.today_button.setEnabled(not is_today)
-        self.focus_card.title.setText("今日重点" if is_today else "当日重点")
-        self.metrics[0].title.setText("今日任务" if is_today else "当日任务")
+        self.task_card.title.setText("今日要做" if is_today else "当日要做")
+        self.metrics[0].title.setText("今日要做" if is_today else "当日要做")
         notes_root = work_root(self.window.store)
         self.notes_root = notes_root
+        if self.todo_index is None or self.todo_root != notes_root:
+            self.todo_index = Agenda(notes_root)
+            self.todo_root = notes_root
+        todo_index = self.todo_index
         daily, root = Daily(notes_root, self.day), self.window.store.setting("project_workspace", "")
         def read(context):
             report = daily.load()
+            todo_report = todo_index.scan(tasks_only=True, context=context)
             context.checkpoint()
-            projects, errors, watches = [], [], [str(notes_root), str(Path(report["path"]).parent), report["path"]]
+            projects, errors = [], list(todo_report["errors"])
+            watches = [str(notes_root), str(Path(report["path"]).parent), report["path"], *todo_report["watches"]]
+            pending = [row for row in todo_report["items"] if not row["done"] and row["day"] != self.day.isoformat()]
             if root:
                 workspace = ProjectWorkspace(Path(root))
                 try:
@@ -415,29 +425,35 @@ class TodayPage(MarkdownPage):
                     except (UserError, OSError):
                         errors.append(item["name"] + "：项目状态需要检查。")
                 watches += [str(workspace.registry_path), str(workspace.registry_path.parent)]
-            return {"daily": report, "projects": projects, "errors": errors, "watches": watches}
+            return {"daily": report, "projects": projects, "errors": errors, "watches": watches,
+                    "todos": pending, "todo_errors": todo_report["errors"]}
         self.read_background(read, self.render)
 
     def render(self, report):
         if not self.matches_day(report["daily"]):
             return
         self.projects = report["projects"]
-        self.render_daily(report["daily"])
+        self.render_daily(report["daily"], report.get("todos"), report.get("todo_errors", []))
         self.render_projects(report)
 
-    def render_daily(self, report):
+    def render_daily(self, report, todos=None, todo_errors=None):
         if not self.matches_day(report):
             return
         self.report = report
-        self.schedule.clear()
-        for row in report["schedule"]:
-            item = QListWidgetItem(row["text"])
-            item.setData(ROW_DATA, row)
-            item.setToolTip(row["text"])
-            self.schedule.addItem(item)
-        if not self.schedule.count():
-            self.schedule.addItem("暂无日程，点右上角添加一项安排。")
-        self.schedule.fit(4)
+        if todos is not None:
+            self.todo_items.clear()
+            ordered = sorted(todos, key=lambda row: (row["day"] > date.today().isoformat(), row["day"]))
+            for row in ordered[:6]:
+                item = QListWidgetItem(row["title"])
+                item.setData(ROW_DATA, row)
+                item.setToolTip("截止日期：" + row["day"] + "\n" + row["title"])
+                self.todo_items.addItem(item)
+            if not self.todo_items.count():
+                self.todo_items.addItem("暂无其他待办。添加 Todo 可设置截止日期。")
+            self.todo_items.fit(6)
+            issue_count = len(todo_errors or [])
+            self.todo_status.setText(f"{len(todos)} 项待办 · 按截止日期排列，双击到期日处理。" +
+                                      (f" 部分文件未读：{issue_count} 项。" if issue_count else ""))
         self.tasks.blockSignals(True)
         self.tasks.clear()
         for row in self.report["tasks"]:
@@ -450,29 +466,18 @@ class TodayPage(MarkdownPage):
             self.tasks.addItem(item)
         self.tasks.blockSignals(False)
         if not self.tasks.count():
-            item = QListWidgetItem("这一天想完成什么？点“添加任务”开始。")
+            item = QListWidgetItem("这一天还没有安排。点“添加任务”开始。")
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.tasks.addItem(item)
         self.tasks.fit(6)
         count = len(report["tasks"])
         done = sum(row["done"] for row in report["tasks"])
-        self.task_card.title.setText(("今日任务" if self.day == date.today() else "当日任务") + f"  ({done}/{count})")
+        self.task_card.title.setText(("今日要做" if self.day == date.today() else "当日要做") + f"  ({done}/{count})")
         self.daily_hint.setText("点复选框即保存 · 双击编辑 · 与 Obsidian 共用")
-        self.focus_items.clear()
-        outstanding = [row for row in report["tasks"] if not row["done"]]
-        priority = {"高": 0, "中": 1, "": 2, "低": 3}
-        outstanding.sort(key=lambda row: (priority[task_details(row["text"])["priority"]], task_details(row["text"])["time"] or "24:00", row["line"]))
-        for position, row in enumerate(outstanding[:3]):
-            item = QListWidgetItem(row["text"])
-            item.setData(ROW_DATA, {**row, "position": position})
-            item.setToolTip(row["text"])
-            self.focus_items.addItem(item)
-        if not self.focus_items.count():
-            self.focus_items.addItem("这一天的任务都已完成。" if count else "先添加一件想完成的事，也可以安排到未来。")
-        self.focus_items.fit(3)
         self.metrics[0].value.setText(f"{done} / {count}")
         self.metrics[0].progress.setValue(round(done * 100 / count) if count else 0)
         self.metrics[0].note.setText(f"已完成 {round(done * 100 / count)}%" if count else "添加第一项任务")
+        outstanding = [row for row in report["tasks"] if not row["done"]]
         high = sum(task_details(row["text"])["priority"] == "高" for row in outstanding)
         self.metrics[1].value.setText(str(high) + " 项")
         self.metrics[1].note.setText("需要优先完成" if high else "没有高优先级任务")
@@ -601,6 +606,11 @@ class TodayPage(MarkdownPage):
     def open_daily(self):
         if self.report:
             self.open_obsidian(self.report["path"])
+
+    def open_todo(self, item):
+        row = item.data(ROW_DATA) or {}
+        if row.get("day"):
+            self.set_day(date.fromisoformat(row["day"]))
 
     def open_project(self, item):
         identity = item.data(Qt.ItemDataRole.UserRole)
