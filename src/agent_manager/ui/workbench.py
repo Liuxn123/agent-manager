@@ -208,7 +208,6 @@ class TodayPage(MarkdownPage):
         self.todo_items.addItem("暂无其他待办。添加 Todo 可设置截止日期。")
         self.todo_items.fit(4)
         self.todo_card.body.addWidget(self.todo_items)
-        left.addWidget(self.todo_card)
         self.task_card = Section("今日要做", 9, "添加任务 ＋", lambda: self.add_entry("今日任务"))
         self.tasks = TodayList("task")
         self.tasks.itemChanged.connect(self.toggle_task)
@@ -219,6 +218,7 @@ class TodayPage(MarkdownPage):
         self.daily_hint.setWordWrap(True)
         self.task_card.body.addWidget(self.daily_hint)
         left.addWidget(self.task_card)
+        left.addWidget(self.todo_card)
         quick = Section("快捷操作", 14)
         actions = FlowLayout()
         for title, action, color in (
