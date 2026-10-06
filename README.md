@@ -1,4 +1,4 @@
-# Agent 管家 · v0.8.2
+# Agent 管家 · v0.8.3
 
 **每天开始 Agent 工作的个人工作台，用来管理今日工作、项目、Agent、Prompt/Skills/MCP 等资源，并保护重要 Agent 数据。**
 

@@ -211,6 +211,19 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(self.window.safety_tabs.currentIndex(), 0)
         self.assertFalse(self.window.timer.isActive())
 
+    def test_safety_workspace_selects_agent_and_exposes_existing_backup_actions(self):
+        self.window.navigation.setCurrentRow(self.window.SAFETY)
+        self.window.safety_kind.setCurrentIndex(3)
+        self.app.processEvents()
+        self.assertEqual(self.window.safety_resource_choice.currentData(), self.agent.id)
+        self.assertEqual(self.window.safety_resource_choice.currentText(), self.agent.name)
+        self.assertTrue(self.window.safety_observe_button.isEnabled())
+        self.assertTrue(self.window.safety_backup_button.isEnabled())
+        self.assertTrue(self.window.safety_verify_button.isEnabled())
+        self.assertTrue(self.window.safety_restore_button.isEnabled())
+        self.assertEqual(self.window.safety_resources.currentIndex(), 3)
+        self.assertEqual(self.window.safety_tabs.tabText(1), "备份历史 / 换电脑")
+
     def test_change_notes_location_keeps_old_files_and_engine_resource_filter_and_url_guard(self):
         old = Path(self.daily.load()["path"])
         before = old.read_bytes()

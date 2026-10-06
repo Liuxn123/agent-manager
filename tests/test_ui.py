@@ -107,10 +107,12 @@ class UITests(unittest.TestCase):
             self.assertEqual(page.restore_button.text(), "恢复备份")
             self.assertEqual(page.resources_table.textElideMode(), Qt.TextElideMode.ElideNone)
             self.assertGreater(page.resources_table.rowHeight(0), 45)
-            controls = [page.observe_button, page.backup_button, page.restore_button, page.more_button, page.library_button]
+            controls = [self.window.safety_observe_button, self.window.safety_backup_button,
+                        self.window.safety_verify_button, self.window.safety_restore_button,
+                        self.window.safety_more_button]
             for first in controls:
                 self.assertGreaterEqual(first.width(), first.sizeHint().width())
-                self.assertLessEqual(first.geometry().right(), page.width())
+                self.assertLessEqual(first.geometry().right(), self.window.safety_control_card.width())
                 for second in controls:
                     if first is not second:
                         self.assertFalse(first.geometry().intersects(second.geometry()))

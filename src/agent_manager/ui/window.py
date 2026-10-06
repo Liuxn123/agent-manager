@@ -63,6 +63,7 @@ def text_view() -> QTextEdit:
 class ResourcePage(QWidget):
     def __init__(self, window: MainWindow, title: str, subtitle: str, kinds: list[str]) -> None:
         super().__init__()
+        self.setObjectName("ResourceManagementPage")
         self.window, self.kinds = window, kinds
         self.rows: list[Resource] = []
         self.compact = len(kinds) == 1
@@ -70,10 +71,12 @@ class ResourcePage(QWidget):
         layout.setSpacing(16)
         heading = QLabel(title)
         heading.setObjectName("Title")
+        self.page_heading = heading
         layout.addWidget(heading)
         description = QLabel(subtitle)
         description.setObjectName("Subtitle")
         description.setWordWrap(True)
+        self.page_description = description
         layout.addWidget(description)
         toolbar = QHBoxLayout()
         self.add = button("＋ 添加工作 Agent" if kinds == ["agent"] else "＋ 添加" + title, self.add_resource, True)
@@ -89,7 +92,9 @@ class ResourcePage(QWidget):
         toolbar.addWidget(self.selector if self.compact else self.search, 1)
         if self.compact:
             self.search.hide()
-        toolbar.addWidget(button("编辑", lambda: window.edit_resource(self.selected())))
+        self.edit_button = button("编辑登记", lambda: window.edit_resource(self.selected()))
+        toolbar.addWidget(self.edit_button)
+        self.toolbar_controls = [self.add, self.search, self.selector, self.edit_button]
         layout.addLayout(toolbar)
         self.agent_action_widgets = []
         self.observe_button = button("检查状态", lambda: self.dispatch("observe"))
@@ -101,6 +106,7 @@ class ResourcePage(QWidget):
         self.library_button = button("浏览会话", lambda: self.dispatch("library"))
         self.logs_button = button("网关日志", lambda: self.dispatch("logs"))
         self.search_records_button = button("搜索记录", lambda: self.window.search_records(self.selected()))
+        self.page_action_widgets = [self.observe_button, self.backup_button, self.verify_button, self.restore_button]
         if kinds == ["agent"]:
             self.usage_button = button("Token 用量", self.show_usage)
             self.rehearse_button = button("试一次恢复", lambda: self.window.rehearse_backup(self.selected()) if self.selected() else None)
@@ -130,26 +136,34 @@ class ResourcePage(QWidget):
                 self.agent_action_widgets.append(widget)
             agent_tools.addStretch(1)
             panel_layout.addLayout(agent_tools)
+            self.agent_tools_panel = panel
             layout.addWidget(panel)
         else:
             actions = FlowLayout()
             for widget in (self.observe_button, self.backup_button, self.verify_button, self.restore_button):
                 actions.addWidget(widget)
             if kinds == ["hermes_local"]:
+                self.versions_button = button("备份提交", lambda: self.dispatch("versions"))
+                self.open_resource_button = button("打开 Hermes 目录", lambda: self.dispatch("open"))
                 actions.addWidget(self.library_button)
-                actions.addWidget(button("备份提交", lambda: self.dispatch("versions")))
-                actions.addWidget(button("打开 Hermes 目录", lambda: self.dispatch("open")))
+                actions.addWidget(self.versions_button)
+                actions.addWidget(self.open_resource_button)
             elif kinds == ["hermes_server"]:
+                self.restart_button = button("重启共享网关", lambda: self.dispatch("restart"))
+                self.profiles_button = button("查看服务器 Profiles", self.inspect_profiles)
                 actions.addWidget(self.logs_button)
-                actions.addWidget(button("重启共享网关", lambda: self.dispatch("restart")))
-                actions.addWidget(button("查看服务器 Profiles", self.inspect_profiles))
+                actions.addWidget(self.restart_button)
+                actions.addWidget(self.profiles_button)
             actions.addWidget(self.more_button)
+            self.page_action_widgets.extend(actions.itemAt(i).widget() for i in range(actions.count()) if actions.itemAt(i).widget())
             layout.addLayout(actions)
         self.metrics = []
+        self.metric_panels = []
         if self.compact:
             metrics = QHBoxLayout()
             for label in ("最近备份", "恢复检查", "运行 / 连接", "资料范围"):
                 panel, value, note = card(label, "等待检查", "")
+                self.metric_panels.append(panel)
                 note.hide()
                 value.setStyleSheet("font-size: 17px; font-weight: 600;")
                 value.setWordWrap(True)
@@ -193,6 +207,7 @@ class ResourcePage(QWidget):
         self.empty.setWordWrap(True)
         self.empty.setObjectName("Subtitle")
         layout.addWidget(self.empty)
+        self.resources_table.setObjectName("SafetyResourceTable")
         self.selection_changed()
 
     def add_resource(self) -> None:
@@ -293,8 +308,7 @@ class ResourcePage(QWidget):
                       f"{counts.get('sessions', '—')} 个会话" if resource.kind == "hermes_local" else resource.options.get("profile_name", "独立资料目录")]
             for value, label in zip(values, self.metrics):
                 label.setText(str(value))
-        summary = f"<h2>{html.escape(resource.name)}</h2><p style='color:#7a849c'>{KINDS[resource.kind]}</p><hr><h3>资料保护</h3><p>{health['state']} · {html.escape(readable_time(health.get('created_at') or '尚无备份'))}</p>"
-        summary += "<p>恢复演练：" + ("已通过" if health.get("rehearsed") else "尚未执行") + "</p>"
+        summary = f"<p style='color:#7a849c'>{KINDS[resource.kind]}</p>"
         if resource.kind == "hermes_server":
             if resource.options.get("profile_name"):
                 summary += "<h3>当前 Profile：" + html.escape(resource.options['profile_name']) + "</h3><p>" + html.escape(resource.options.get("profile_home", "")) + "</p><p>两个 Profile 共用网关和现有服务器备份。原生备份 / 恢复按整套服务器资料执行。</p>"
@@ -303,7 +317,10 @@ class ResourcePage(QWidget):
                 summary += f"<p>磁盘 {observation.get('disk_used_percent', '未知')}% · 内存 {observation.get('memory_used_percent', '未知')}%</p><p>备份环境：{'就绪' if observation.get('backup_ready') else '请查看配置与诊断'}</p>"
         elif resource.kind == "hermes_local":
             counts = (observation or {}).get("counts", {})
-            summary += f"<h3>Hermes 快照</h3><p>{counts.get('sessions', '—')} 个会话 · {counts.get('messages', '—')} 条消息</p><p>{counts.get('facts', '—')} 条事实记忆</p>"
+            if counts:
+                summary += f"<h3>Hermes 快照</h3><p>{counts.get('sessions', '—')} 个会话 · {counts.get('messages', '—')} 条消息</p><p>{counts.get('facts', '—')} 条事实记忆</p>"
+            else:
+                summary += "<h3>Hermes 快照</h3><p>运行检查后显示会话、消息和事实记忆数量。</p>"
         elif resource.kind == "agent":
             checked_paths = {item.get("label"): item.get("exists") for item in (observation or {}).get("components", [])}
             source_rows = []
@@ -321,12 +338,28 @@ class ResourcePage(QWidget):
             summary += "</p>"
         else:
             summary += "<h3>项目位置</h3><p>" + html.escape(str(resource.options.get("path", ""))) + "</p>"
-        policy_note = "手动按需备份 · 不自动连接服务器" if resource.kind == "hermes_server" else "每天自动备份 · 管家打开时生效" if resource.options.get("automatic_backup") else "自动备份未开启 · 可在编辑中设置"
-        summary += "<hr><p style='color:#7a849c'>" + policy_note + "</p>"
-        self.details.setHtml(summary)
         tasks = self.window.store.task_summaries(limit=5, resource_id=resource.id)
-        self.recent_details.setPlainText("\n\n".join(readable_time(task['started_at']) + " · " + STATE_LABELS.get(task['state'], task['state']) + "\n" + task['title'] for task in tasks) or "这项资料还没有操作记录。检查状态、备份或恢复后，会显示在这里。")
+        recent_text = "\n\n".join(readable_time(task['started_at']) + " · " + STATE_LABELS.get(task['state'], task['state']) + "\n" + task['title'] for task in tasks) or "这项资料还没有操作记录。检查状态、备份或恢复后，会显示在这里。"
+        self.recent_details.setPlainText(recent_text)
+        policy_note = "手动按需备份 · 不自动连接服务器" if resource.kind == "hermes_server" else "每天自动备份 · 管家打开时生效" if resource.options.get("automatic_backup") else "自动备份未开启 · 可在编辑中设置"
+        recent_html = "<br>".join(html.escape(readable_time(task['started_at']) + " · " + STATE_LABELS.get(task['state'], task['state']) + " · " + task['title']) for task in tasks[:3]) or "还没有操作记录。完成检查、备份或恢复后，会显示在这里。"
+        overview = (
+            "<h2>" + html.escape(resource.name) + "</h2>"
+            "<table width='100%' cellspacing='8' cellpadding='12'>"
+            "<tr><td width='42%' bgcolor='#f3f7ff' valign='top'><h3>保护状态</h3>"
+            "<p><b>" + html.escape(health['state']) + "</b></p><p>上次备份：" + html.escape(readable_time(health.get('created_at') or '尚无备份')) + "</p>"
+            "<p>资料范围：" + html.escape(str((observation or {}).get('counts', {}).get('sessions', '尚未读取')) + (' 个会话' if (observation or {}).get('counts', {}).get('sessions') is not None else '')) + "</p></td>"
+            "<td width='58%' bgcolor='#f7f9fc' valign='top'><h3>当前资料</h3>" + summary + "</td></tr>"
+            "<tr><td bgcolor='#fff8ed' valign='top'><h3>恢复演练 / 校验</h3><p><b>" + ("已通过" if health.get('rehearsed') else "已校验" if health.get('verified') else "尚未执行") + "</b></p>"
+            "<p>建议至少定期校验一次，确认备份完整且可恢复。</p><p>" + html.escape(policy_note) + "</p></td>"
+            "<td bgcolor='#f7f9fc' valign='top'><h3>最近操作</h3><p>" + recent_html + "</p></td></tr>"
+            "</table>"
+        )
+        self.details.setHtml(overview)
         self.populate_paths(resource)
+        if (hasattr(self.window, "safety_kind") and hasattr(self.window, "update_safety_workspace")
+                and self.window.resource_pages[self.window.safety_kind.currentIndex()] is self):
+            self.window.update_safety_workspace()
 
     def show_paths(self) -> None:
         self.tabs.setCurrentIndex(1)
@@ -503,7 +536,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.refresh_agent_activity)
 
     def organize_workbench(self):
-        """Reuse established management pages inside one safety area."""
+        """Unify the existing backup adapters behind one safety workspace."""
         from .workbench import TodayPage, CatalogPage, AgentPage
         old = [self.stack.widget(i) for i in range(self.stack.count())]
         for page in old:
@@ -512,18 +545,101 @@ class MainWindow(QMainWindow):
         self.agent_page = AgentPage(self)
         self.catalog_page = CatalogPage(self)
         safety = QWidget()
+        safety.setObjectName("SafetyPage")
         layout = QVBoxLayout(safety)
+        layout.setContentsMargins(24, 20, 18, 18)
+        layout.setSpacing(10)
+        title = QLabel("数据安全")
+        title.setObjectName("Title")
+        layout.addWidget(title)
+        subtitle = QLabel("集中管理 Agent 备份与恢复；日常只看状态，需要处理时再进入历史和诊断。")
+        subtitle.setObjectName("Subtitle")
+        layout.addWidget(subtitle)
         self.safety_tabs = QTabWidget()
+        self.safety_tabs.setObjectName("SafetyTabs")
         management = QWidget()
+        management.setObjectName("SafetyWorkspace")
         controls = QVBoxLayout(management)
+        controls.setContentsMargins(0, 4, 0, 0)
+        controls.setSpacing(10)
+        selection_card = QFrame()
+        selection_card.setObjectName("SafetyControlCard")
+        self.safety_control_card = selection_card
+        selection_layout = QVBoxLayout(selection_card)
+        selection_layout.setContentsMargins(14, 12, 14, 12)
+        selection_layout.setSpacing(9)
+        selector_row = QHBoxLayout()
+        selector_row.addWidget(QLabel("备份目标"))
         self.safety_kind = QComboBox()
         self.safety_kind.addItems(["本地 Hermes", "服务器 Hermes", "项目与 Obsidian 资料", "其他 Agent"])
-        controls.addWidget(self.safety_kind)
+        self.safety_kind.setMinimumWidth(190)
+        selector_row.addWidget(self.safety_kind)
+        selector_row.addWidget(QLabel("当前登记项"))
+        self.safety_resource_choice = QComboBox()
+        self.safety_resource_choice.setEditable(True)
+        self.safety_resource_choice.setMinimumContentsLength(20)
+        self.safety_resource_choice.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.safety_resource_choice.lineEdit().setPlaceholderText("选择已登记的 Agent 或项目")
+        selector_row.addWidget(self.safety_resource_choice, 1)
+        self.safety_edit_button = button("编辑登记", self.edit_safety_resource)
+        selector_row.addWidget(self.safety_edit_button)
+        self.safety_add_button = button("＋ 登记资源", self.add_safety_resource, True)
+        selector_row.addWidget(self.safety_add_button)
+        selection_layout.addLayout(selector_row)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(7)
+        self.safety_observe_button = button("检查状态", lambda: self.safety_dispatch("observe"))
+        self.safety_backup_button = button("立即备份", lambda: self.safety_dispatch("backup"), True)
+        self.safety_verify_button = button("校验备份", lambda: self.safety_dispatch("verify"))
+        self.safety_restore_button = button("恢复备份", lambda: self.safety_dispatch("restore"))
+        self.safety_more_button = button("更多操作", self.safety_more_actions)
+        for widget in (self.safety_observe_button, self.safety_backup_button, self.safety_verify_button,
+                       self.safety_restore_button, self.safety_more_button):
+            action_row.addWidget(widget)
+        self.safety_action_buttons = (self.safety_observe_button, self.safety_backup_button,
+                                      self.safety_verify_button, self.safety_restore_button,
+                                      self.safety_more_button)
+        action_row.addStretch(1)
+        selection_layout.addLayout(action_row)
+        controls.addWidget(selection_card)
+
+        self.safety_metric_values = []
+        metric_row = QHBoxLayout()
+        metric_row.setSpacing(9)
+        for heading, initial, note in (("最近备份", "尚无备份", "备份状态"),
+                                      ("恢复检查", "尚待验证", "定期演练确认可恢复"),
+                                      ("运行 / 连接", "等待检查", "不会自动连接服务器"),
+                                      ("资料范围", "选择登记项", "按已登记的资料保护")):
+            panel, value, detail = card(heading, initial, note)
+            panel.setObjectName("SafetyMetric")
+            value.setObjectName("SafetyMetricValue")
+            detail.setObjectName("SafetyMetricNote")
+            value.setWordWrap(True)
+            self.safety_metric_values.append((value, detail))
+            metric_row.addWidget(panel, 1)
+        controls.addLayout(metric_row)
+
         self.safety_resources = QStackedWidget()
         for page in self.resource_pages:
+            page.page_heading.hide()
+            page.page_description.hide()
+            for widget in page.toolbar_controls + page.page_action_widgets:
+                widget.hide()
+            for panel in page.metric_panels:
+                panel.hide()
+            page.resources_table.hide()
+            page.empty.hide()
+            if hasattr(page, "agent_tools_panel"):
+                page.agent_tools_panel.hide()
             self.safety_resources.addWidget(page)
         controls.addWidget(self.safety_resources, 1)
-        self.safety_kind.currentIndexChanged.connect(self.safety_resources.setCurrentIndex)
+        self.safety_kind.currentIndexChanged.connect(self.select_safety_kind)
+        self.safety_resource_choice.currentIndexChanged.connect(self.select_safety_resource)
+        self.safety_empty = QLabel("尚无登记资源。可先登记 Hermes、工作 Agent 或要保护的项目。")
+        self.safety_empty.setObjectName("SafetyEmpty")
+        self.safety_empty.setWordWrap(True)
+        controls.addWidget(self.safety_empty)
         self.safety_tabs.addTab(management, "备份与恢复")
         self.safety_tabs.addTab(old[5], "备份历史 / 换电脑")
         self.safety_tabs.addTab(old[6], "操作记录")
@@ -535,18 +651,150 @@ class MainWindow(QMainWindow):
         self.activity_tabs.setCurrentIndex(1)
         for page in (self.today_page, self.project_page, self.agent_page, self.catalog_page, safety, old[7]):
             self.stack.addWidget(page)
+        self.update_safety_resource_choices()
+
+    def select_safety_kind(self, index):
+        self.safety_resources.setCurrentIndex(index)
+        self.update_safety_resource_choices()
+
+    def select_safety_resource(self, row):
+        if not hasattr(self, "safety_resources") or row < 0:
+            return
+        page = self.resource_pages[self.safety_kind.currentIndex()]
+        identity = self.safety_resource_choice.itemData(row)
+        selected_row = next((i for i, resource in enumerate(page.rows) if resource.id == identity), -1)
+        if selected_row >= 0:
+            page.resources_table.selectRow(selected_row)
+            page.selection_changed()
+
+    def update_safety_resource_choices(self):
+        if not hasattr(self, "safety_resource_choice"):
+            return
+        index = self.safety_kind.currentIndex()
+        page = self.resource_pages[index]
+        selected = page.selected()
+        combo = self.safety_resource_choice
+        combo.blockSignals(True)
+        combo.clear()
+        for resource in page.rows:
+            combo.addItem(resource.name, resource.id)
+        selected_index = next((i for i, resource in enumerate(page.rows) if selected and resource.id == selected.id), 0 if page.rows else -1)
+        combo.setCurrentIndex(selected_index)
+        combo.blockSignals(False)
+        combo.setEnabled(bool(page.rows))
+        self.safety_edit_button.setEnabled(bool(selected))
+        self.safety_empty.setVisible(not page.rows)
+        add_labels = ("＋ 添加本地 Hermes", "＋ 登记服务器 Hermes", "＋ 新建项目 / Vault", "＋ 登记工作 Agent")
+        self.safety_add_button.setText(add_labels[index])
+        self.safety_resources.setCurrentIndex(index)
+        self.update_safety_workspace()
+
+    def select_safety_kind_for_resource(self, resource):
+        index = {"hermes_local": 0, "hermes_server": 1, "project": 2, "vault": 2, "agent": 3}[resource.kind]
+        self.safety_kind.setCurrentIndex(index)
+        self.update_safety_resource_choices()
+        combo_index = self.safety_resource_choice.findData(resource.id)
+        if combo_index >= 0:
+            self.safety_resource_choice.setCurrentIndex(combo_index)
+
+    def add_safety_resource(self):
+        self.resource_pages[self.safety_kind.currentIndex()].add_resource()
+
+    def edit_safety_resource(self):
+        self.edit_resource(self.resource_pages[self.safety_kind.currentIndex()].selected())
+
+    def safety_dispatch(self, action):
+        resource = self.resource_pages[self.safety_kind.currentIndex()].selected()
+        if resource:
+            self.perform(resource, action)
+
+    def safety_more_actions(self):
+        page = self.resource_pages[self.safety_kind.currentIndex()]
+        resource = page.selected()
+        if not resource:
+            return
+        menu = QMenu(self)
+        # Build actions explicitly so every item reuses the established adapter callback.
+        def action(title, callback, enabled=True):
+            item = menu.addAction(title)
+            item.setEnabled(enabled)
+            item.triggered.connect(callback)
+        if resource.kind == "hermes_local":
+            action("浏览会话", lambda: self.perform(resource, "library"))
+            action("查看备份提交", lambda: self.perform(resource, "versions"))
+            action("打开 Hermes 目录", lambda: self.perform(resource, "open"))
+        elif resource.kind == "hermes_server":
+            action("查看网关日志", lambda: self.perform(resource, "logs"))
+            action("重启共享网关…", lambda: self.perform(resource, "restart"))
+            action("查看服务器 Profiles", page.inspect_profiles)
+        elif resource.kind == "agent":
+            action("浏览本地记录", lambda: self.perform(resource, "records"))
+            action("搜索记录", lambda: self.search_records(resource))
+            action("Token 用量", page.show_usage)
+            action("恢复演练", lambda: self.rehearse_backup(resource))
+            action("打开资料目录", lambda: self.perform(resource, "open"))
+        else:
+            action("恢复演练", lambda: self.rehearse_backup(resource))
+            if resource.kind == "vault":
+                action("在 Obsidian 打开", lambda: self.perform(resource, "open_vault"))
+            if resource.options.get("manage_git"):
+                action("Git 快进拉取…", lambda: self.perform(resource, "git_pull"))
+        menu.addSeparator()
+        action("编辑登记", lambda: self.edit_resource(resource))
+        action("移除登记…", lambda: self.remove_resource(resource))
+        menu.exec(self.safety_more_button.mapToGlobal(self.safety_more_button.rect().bottomLeft()))
+
+    def update_safety_workspace(self):
+        if not hasattr(self, "safety_metric_values"):
+            return
+        index = self.safety_kind.currentIndex()
+        page = self.resource_pages[index]
+        resource = page.selected()
+        buttons = (self.safety_observe_button, self.safety_backup_button, self.safety_verify_button, self.safety_restore_button, self.safety_more_button)
+        if not resource:
+            for value, note in self.safety_metric_values:
+                value.setText("—")
+                note.setText("选择或登记一项资料")
+            for widget in buttons:
+                widget.setEnabled(False)
+            self.safety_edit_button.setEnabled(False)
+            return
+        capabilities = self.service.registry.get(resource).capabilities
+        busy = self.is_busy(resource.id)
+        for widget, capability in zip(buttons[:4], ("observe", "backup", "verify", "restore")):
+            widget.setEnabled(capability in capabilities and not busy)
+        buttons[4].setEnabled(not busy)
+        self.safety_edit_button.setEnabled(not busy)
+        health = backup_health(self.store, resource, self.service.backup_root())
+        observation = self.observations.get(resource.id, {})
+        recovery = "已演练" if health.get("rehearsed") else "已校验" if health.get("verified") else "尚待验证"
+        backup_time = readable_time(health.get("created_at") or "尚无备份")
+        if resource.kind == "hermes_local":
+            counts = observation.get("counts", {})
+            scope = f"{counts.get('sessions')} 个会话 · {counts.get('messages', 0)} 条消息" if counts else "运行检查后显示会话数"
+        elif resource.kind == "hermes_server":
+            scope = "服务器 Profiles 与 Hermes 运行资料"
+        elif resource.kind == "agent":
+            scope = f"{len(sources_for(resource))} 个记录目录"
+        else:
+            scope = Path(resource.options.get("path", "")).name or "已登记项目资料"
+        run_state = observation.get("state") or ("已连接" if observation.get("connected") else "尚未检查")
+        if resource.kind == "hermes_local" and observation:
+            run_state = "运行正常" if observation.get("running") or observation.get("state") == "running" else "已检查"
+        elif resource.kind == "hermes_server" and observation:
+            run_state = "连接正常" if observation.get("connected") else "连接异常"
+        metric_data = ((health["state"], "上次备份：" + backup_time),
+                       (recovery, "最近备份完整性" if health.get("verified") or health.get("rehearsed") else "建议创建备份后进行校验"),
+                       (run_state, "点击“检查状态”读取最新结果" if not observation else readable_time(observation.get("observed_at", "已检查"))),
+                       (scope, str(resource.options.get("home", "")) if resource.kind.startswith("hermes") else ""))
+        for (value, note), (headline, detail) in zip(self.safety_metric_values, metric_data):
+            value.setText(str(headline))
+            note.setText(str(detail))
 
     def open_safety_resource(self, resource):
-        index = {"hermes_local": 0, "hermes_server": 1, "project": 2, "vault": 2, "agent": 3}[resource.kind]
         self.navigation.setCurrentRow(self.SAFETY)
         self.safety_tabs.setCurrentIndex(0)
-        self.safety_kind.setCurrentIndex(index)
-        page = self.resource_pages[index]
-        row = next((i for i, item in enumerate(page.rows) if item.id == resource.id), None)
-        if row is not None:
-            page.resources_table.selectRow(row)
-            if page.compact:
-                page.selector.setCurrentIndex(row)
+        self.select_safety_kind_for_resource(resource)
 
     def open_backup_history(self):
         self.navigation.setCurrentRow(self.SAFETY)
@@ -672,7 +920,7 @@ class MainWindow(QMainWindow):
     def build_backups(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
-        title = QLabel("备份与换电脑")
+        title = QLabel("备份历史与换电脑恢复")
         title.setObjectName("Title")
         layout.addWidget(title)
         hint = QLabel("恢复已备份的项目、笔记、聊天文件、数据库和附件，并重新登记新路径。不会安装原应用或恢复云端独有记录；续聊与登录需在原应用核对。Hermes 原生恢复请到对应页面。")
@@ -1148,6 +1396,7 @@ class MainWindow(QMainWindow):
         self.project_page.refresh_myself()
         self.refresh_dashboard()
         self.agent_page.refresh()
+        self.update_safety_resource_choices()
 
     def add_resource(self, kind: str) -> None:
         dialog = ResourceDialog(self, kind)

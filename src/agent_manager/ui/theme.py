@@ -151,4 +151,20 @@ QLabel#CatalogDetailFacts { color: #607493; line-height: 1.5; }
 QTextBrowser#CatalogBodyPreview { background: transparent; border: none; padding: 4px 2px; color: #364d70; }
 QWidget#CatalogPage QLineEdit, QWidget#CatalogPage QComboBox { min-height: 22px; }
 QWidget#CatalogPage QPushButton { padding: 8px 12px; }
+QWidget#SafetyPage { background: #f5f6fb; }
+QWidget#SafetyPage QLabel#Title { font-size: 25px; }
+QWidget#SafetyPage QFrame#SafetyControlCard { background: #ffffff; border: 1px solid #e6ecf5; border-radius: 12px; }
+QWidget#SafetyPage QFrame#SafetyMetric { background: #ffffff; border: 1px solid #e6ecf5; border-radius: 12px; }
+QWidget#SafetyPage QLabel#SafetyMetricValue { color: #17305c; font-size: 18px; font-weight: 700; }
+QWidget#SafetyPage QLabel#SafetyMetricNote { color: #7685a1; font-size: 11px; }
+QWidget#SafetyPage QLabel#SafetyEmpty { background: #edf4ff; border: 1px solid #dfeaff; border-radius: 10px; padding: 10px 13px; color: #607493; }
+QWidget#SafetyPage QTabWidget#SafetyTabs::pane { background: transparent; border: none; }
+QWidget#SafetyPage QTabWidget#SafetyTabs > QTabBar::tab { padding: 9px 14px; font-size: 13px; }
+QWidget#SafetyPage QComboBox { min-height: 22px; }
+QWidget#SafetyPage QPushButton[primary="true"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #4e8aff,stop:1 #2864ed); border-color: #3976f4; }
+QWidget#SafetyPage QPushButton[primary="true"]:hover { background: #3976f4; }
+QWidget#ResourceManagementPage { background: transparent; }
+QWidget#ResourceManagementPage QTabWidget::pane { background: #ffffff; border: 1px solid #e8edf5; border-radius: 12px; }
+QWidget#ResourceManagementPage QTabBar::tab { padding: 9px 13px; }
+QWidget#ResourceManagementPage QTextEdit { border: none; background: #ffffff; }
 """
