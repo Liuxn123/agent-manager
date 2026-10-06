@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
 
-from PySide6.QtCore import QThreadPool, QTimer, Qt, QUrl, QUrlQuery, QSize
+from PySide6.QtCore import QThreadPool, QTimer, Qt, QUrl, QUrlQuery, QSize, Signal
 from PySide6.QtGui import QDesktopServices, QColor, QTextOption
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -403,6 +403,7 @@ class ResourcePage(QWidget):
 
 
 class MainWindow(QMainWindow):
+    task_completed = Signal(str, str)
     TODAY, PROJECT, AGENT, LIBRARY, SAFETY, SETTINGS = range(6)
 
     def __init__(self, store: Store) -> None:
@@ -1227,6 +1228,8 @@ class MainWindow(QMainWindow):
         elif state == "failed":
             QMessageBox.warning(self, "操作未完成", str(result.get("error", "请查看任务记录。")))
         self.refresh_common_password()
+
+        self.task_completed.emit(identity, state)
 
     def password_input(self, creating: bool) -> tuple[str, bool] | None:
         dialog = PasswordDialog(self, creating)

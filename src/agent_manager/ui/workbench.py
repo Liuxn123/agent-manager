@@ -95,6 +95,8 @@ class MarkdownPage(QWidget):
         QMessageBox.warning(self, "资料读取失败", "请检查资料格式、路径与文件权限。原文件未改变。")
 
     def watch(self, paths):
+        if self.watcher.property("projectMovePaused"):
+            return
         previous = self.watcher.files() + self.watcher.directories()
         available = []
         for value in paths:

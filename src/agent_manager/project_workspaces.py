@@ -447,12 +447,16 @@ class ProjectWorkspace:
             state = "active" if plan["resume"] else "archived"
             journal = self.path("agent/history/" + uuid4().hex + "-move.json")
             self.write(journal, json.dumps({**current, "reason": reason, "state": "prepared"}, ensure_ascii=False, indent=2))
+            phase, moved = "rename_directory", False
             try:
                 os.rename(source, target)
+                moved = True
+                phase = "verify_files"
                 # Do not interrupt critical directory/registry/link switching.
                 if self.manifest(target, TaskContext()) != current["records"]:
                     raise UserError("移动后文件清单不同，保留现场并停止。")
                 if item.get("vault_entry"):
+                    phase = "relink_obsidian"
                     entry = self.path(item["vault_entry"], allow_link=True)
                     if not linked(entry) or entry.resolve() != source.resolve():
                         raise UserError("入口在移动期间变化，请按移动记录修复。")
@@ -462,6 +466,7 @@ class ProjectWorkspace:
                         entry.unlink()
                     self._link(item["vault_entry"], target)
                 item["path"] = target.relative_to(self.root).as_posix()
+                phase = "update_documents"
                 for name in ("README.md", "AGENTS.md", "agent/STATUS.md"):
                     path = self.path(item["path"] + "/" + name)
                     before = self.read(path)
@@ -473,12 +478,32 @@ class ProjectWorkspace:
                 handoff = self.path(item["path"] + "/agent/HANDOFF.md")
                 before = self.read(handoff)
                 self.write(handoff, before.rstrip() + f"\n\n## {today()} — 管家{'重新启用' if plan['resume'] else '归档'}\n- 原位置：`{source}`\n- 新位置：`{target}`\n- 原因/下一步：{reason.strip()}\n- 验证：移动后 {current['file_count']} 个文件哈希及目录清单一致；未执行备份恢复验证。\n- 原代码绝对路径和 Git/同步设置需核对，未自动改写业务文件。\n", before)
+                phase = "save_registry"
                 self.save_registry(data, observed)
+                phase = "update_indexes"
                 self.update_indexes(data)
+                phase = "complete_receipt"
                 before = self.read(journal)
                 self.write(journal, json.dumps({**current, "reason": reason, "state": "completed"}, ensure_ascii=False, indent=2), before)
             except (OSError, UserError) as exc:
-                raise UserError("移动过程未全部完成，禁止盲目重试。请保留目录并按记录核对：" + str(journal)) from exc
+                intact = False
+                if not moved and source.is_dir() and not target.exists():
+                    try:
+                        intact = self.manifest(source, TaskContext()) == current["records"]
+                    except (OSError, UserError):
+                        pass
+                receipt = {**current, "reason": reason, "state": "failed_before_move" if intact else "needs_review",
+                           "phase": phase, "error_type": type(exc).__name__, "error": str(exc),
+                           "winerror": getattr(exc, "winerror", None)}
+                try:
+                    before = self.read(journal)
+                    self.write(journal, json.dumps(receipt, ensure_ascii=False, indent=2), before)
+                except (OSError, UserError):
+                    # Preserve the original operation failure and prepared receipt.
+                    pass
+                message = ("目录未移动，文件清单与预检一致。请关闭占用项目目录的程序，再重新预检。" if intact else
+                           "移动过程未全部完成，禁止盲目重试。请保留目录并按记录核对。")
+                raise UserError(message + "\n失败步骤：" + phase + "\n原因：" + str(exc) + "\n记录：" + str(journal)) from exc
         return {"project_id": item["id"], "directory": str(target), "state": state, "verified_files": current["file_count"]}
 
 

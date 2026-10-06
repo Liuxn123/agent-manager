@@ -65,7 +65,7 @@ class ProjectLogView(QWidget):
 
 
 class ProjectDialog(QDialog):
-    def __init__(self, parent):
+    def __init__(self, parent, legacy=None):
         super().__init__(parent)
         self.setWindowTitle("新建项目 · 按既有规范初始化")
         self.resize(580, 370)
@@ -79,6 +79,11 @@ class ProjectDialog(QDialog):
         self.goal.setPlaceholderText("这个项目希望完成什么？")
         self.entry = QCheckBox("在工作区的 Obsidian 建立同一份资料入口")
         self.entry.setChecked(True)
+        if legacy:
+            self.setWindowTitle("从旧归档继续 · 新建编号项目")
+            note.setText("原归档保留原位。为接下来的工作分配新编号，创建状态、任务和日志，并引用原资料；不会搬动或复制业务文件。")
+            self.name.setText(legacy["name"] + "-接续")
+            self.goal.setPlainText("接续旧项目 " + legacy["name"] + "（" + legacy["id"] + "）。\n原归档资料：" + legacy["directory"] + "\n下一步：核对原项目状态、业务代码位置和本次目标。")
         form.addRow("项目名称", self.name)
         form.addRow("项目目标", self.goal)
         form.addRow("", self.entry)
@@ -105,6 +110,10 @@ class ProjectPage(QWidget):
         self.document_version = 0
         self.note_version = 0
         self.watch_paths = []
+        self.move_task = ""
+        self.move_watchers = []
+        self.move_selection = None
+        window.task_completed.connect(self.move_finished)
         self.preferred_note = ""
         self.preferred_project = ""
         self.status_text, self.task_text, self.project_catalog = "", "", []
@@ -514,7 +523,7 @@ class ProjectPage(QWidget):
         def locked(context):
             with self.window.service.locks.acquire(self.window.service.lock_keys(owner)):
                 return operation(context)
-        self.window.submit(owner, title, locked, callback, persist_result=persist_result)
+        return self.window.submit(owner, title, locked, callback, persist_result=persist_result)
 
     def choose_workspace(self):
         if self.owner() and self.window.is_busy(self.owner().id):
@@ -541,7 +550,7 @@ class ProjectPage(QWidget):
             QMessageBox.warning(self, "无法使用工作区", str(exc))
 
     def refresh(self):
-        if self.closed:
+        if self.closed or self.move_watchers:
             return
         root = self.root()
         self.root_label.setText("工作区：" + str(root) if root else "未选择项目工作区")
@@ -592,7 +601,7 @@ class ProjectPage(QWidget):
 
     def update_selection_actions(self, *_):
         item = self.selected()
-        enabled = bool(item)
+        enabled = bool(item) and not self.move_watchers
         archived = bool(item and item["path"].startswith("archive/"))
         self.open_button.setEnabled(enabled)
         self.resource_button.setEnabled(enabled)
@@ -600,8 +609,8 @@ class ProjectPage(QWidget):
         self.new_note_button.setEnabled(enabled and not archived)
         self.log_button.setEnabled(enabled and not archived and not self.document_errors.get(2))
         self.edit_button.setEnabled(enabled and not archived and self.documents.currentIndex() < 2 and not self.document_errors.get(self.documents.currentIndex()))
-        self.move_button.setEnabled(enabled and not item.get("legacy", False) if item else False)
-        self.move_button.setText("重新启用…" if archived else "归档项目…")
+        self.move_button.setEnabled(enabled)
+        self.move_button.setText("从旧归档继续…" if item and item.get("legacy") else "重新启用…" if archived else "归档项目…")
         self.stage_button.setEnabled(enabled and not archived and bool(self.status_text) and not self.document_errors.get(0))
         self.summary_button.setEnabled(enabled and not archived and bool(self.status_text) and not self.document_errors.get(2))
         for control, action in self.more_actions.items():
@@ -610,6 +619,8 @@ class ProjectPage(QWidget):
         self.more_button.setEnabled(enabled)
 
     def selection_changed(self):
+        if self.move_watchers:
+            return
         self.status_text, self.task_text = "", ""
         self.document_errors = {}
         self.project_details = {}
@@ -733,6 +744,8 @@ class ProjectPage(QWidget):
         self.window.submit(None, "读取项目管理文档", read, show, persist_result=False)
 
     def update_watches(self, paths):
+        if self.watcher.property("projectMovePaused"):
+            return
         existing = self.watcher.files() + self.watcher.directories()
         if existing:
             self.watcher.removePaths(existing)
@@ -816,11 +829,11 @@ class ProjectPage(QWidget):
         if workspace:
             self.submit("刷新 Obsidian 项目索引", workspace.refresh_indexes, lambda report: self.refresh())
 
-    def create_project(self):
+    def create_project(self, legacy=None):
         if not self.root():
             self.choose_workspace()
             return
-        dialog = ProjectDialog(self)
+        dialog = ProjectDialog(self, legacy if isinstance(legacy, dict) else None)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         name, goal, entry = dialog.name.text().strip(), dialog.goal.toPlainText().strip(), dialog.entry.isChecked()
@@ -897,6 +910,9 @@ class ProjectPage(QWidget):
         item = self.selected()
         if not item:
             return
+        if item.get("legacy"):
+            self.create_project(legacy=item)
+            return
         workspace = self.workspace()
         resume = item["path"].startswith("archive/")
         def preview(plan):
@@ -927,5 +943,51 @@ class ProjectPage(QWidget):
             layout.addWidget(buttons)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 text = reason.toPlainText()
-                self.submit("重新启用项目" if resume else "归档项目", lambda context: workspace.move(plan, text, context), lambda report: self.refresh())
+                self.pause_move_watches()
+                self.move_selection = (item["id"], resume)
+                try:
+                    self.move_task = self.submit("重新启用项目" if resume else "归档项目", lambda context: workspace.move(plan, text, context)) or ""
+                finally:
+                    if not self.move_task:
+                        self.restore_move_watches()
         self.submit("重新启用预检" if resume else "项目归档预检", lambda context: workspace.plan_move(item["id"], resume, context), preview, persist_result=False)
+
+    def pause_move_watches(self):
+        # Windows directory notification handles prevent rename. Today also
+        # watches project STATUS files, including while its page is hidden.
+        self.reload_timer.stop()
+        self.document_version += 1
+        self.note_version += 1
+        for watcher in self.window.findChildren(QFileSystemWatcher):
+            paths = watcher.files() + watcher.directories()
+            self.move_watchers.append((watcher, paths, watcher.signalsBlocked()))
+            watcher.setProperty("projectMovePaused", True)
+            watcher.blockSignals(True)
+            if paths:
+                watcher.removePaths(paths)
+        self.update_selection_actions()
+
+    def restore_move_watches(self):
+        for watcher, paths, blocked in self.move_watchers:
+            watcher.setProperty("projectMovePaused", False)
+            available = [p for p in paths if Path(p).exists()]
+            if available:
+                watcher.addPaths(available)
+            watcher.blockSignals(blocked)
+        self.move_watchers = []
+        self.move_task = ""
+        self.update_selection_actions()
+
+    def move_finished(self, identity, state):
+        if identity != self.move_task:
+            return
+        selection = self.move_selection
+        self.move_selection = None
+        self.restore_move_watches()
+        if self.closed:
+            return
+        if state == "success" and selection:
+            self.filter.setCurrentIndex(0 if selection[1] else 1)
+            self.preferred_project = selection[0]
+        self.refresh()
+        self.window.today_page.refresh()

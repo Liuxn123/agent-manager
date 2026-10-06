@@ -8,9 +8,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import Qt, QPoint, QDate
+from PySide6.QtCore import Qt, QPoint, QDate, QFileSystemWatcher
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit, QVBoxLayout, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit, QVBoxLayout, QMessageBox, QCheckBox
 
 from agent_manager.domain import Resource
 from agent_manager.storage import Store
@@ -279,6 +279,97 @@ class WorkbenchUITests(unittest.TestCase):
             self.until(lambda: page.selected() is not None and page.selected()["name"] == "新初始化项目" and bool(page.status_text))
         self.assertEqual(page.search.text(), "")
         self.assertEqual(len(self.workspace.list_projects(TaskContext())["projects"]), 2)
+
+    def test_archive_and_resume_release_all_watchers_and_keep_payload_and_entry(self):
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        page = self.window.project_page
+        self.until(lambda: bool(page.status_text) and not self.window.today_page.worker)
+        source = Path(self.project["directory"])
+        (source / "payload.bin").write_bytes(bytes(range(256)))
+        item = self.workspace.project(self.project["project_id"])
+        entry = self.workspace.root / item["vault_entry"]
+        def confirm(dialog):
+            dialog.findChild(QTextEdit).setPlainText("GUI 归档与接续验证")
+            dialog.findChild(QCheckBox).setChecked(True)
+            return QDialog.DialogCode.Accepted
+        for resume in (False, True):
+            with patch("agent_manager.ui.projects.QDialog.exec", confirm):
+                page.more_actions[page.move_button].trigger()
+                expected = "projects/" if resume else "archive/"
+                self.until(lambda: page.selected() and page.selected()["path"].startswith(expected) and bool(page.status_text) and not page.move_watchers)
+            destination = Path(page.selected()["directory"])
+            self.assertEqual((destination / "payload.bin").read_bytes(), bytes(range(256)))
+            self.assertEqual(entry.resolve(), destination.resolve())
+            self.assertEqual(page.selected()["id"], self.project["project_id"])
+            self.assertIn(str(destination), page.watcher.directories())
+            self.assertFalse(any(w.property("projectMovePaused") for w in self.window.findChildren(QFileSystemWatcher)))
+
+    def test_failed_archive_restores_watchers_and_rejects_late_watch_registration(self):
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        page = self.window.project_page
+        self.until(lambda: bool(page.status_text) and not self.window.today_page.worker)
+        source = Path(self.project["directory"])
+        original = self.workspace.manifest(source, TaskContext())
+        def confirm(dialog):
+            dialog.findChild(QTextEdit).setPlainText("失败清理验证")
+            dialog.findChild(QCheckBox).setChecked(True)
+            return QDialog.DialogCode.Accepted
+        def fail_move(*args):
+            raise OSError("injected move failure")
+        with patch("agent_manager.ui.projects.QDialog.exec", confirm), patch.object(ProjectWorkspace, "move", fail_move), patch.object(QMessageBox, "warning") as warning:
+            page.move_project()
+            self.until(lambda: warning.called and not page.move_watchers and bool(page.status_text))
+        self.assertEqual(self.workspace.manifest(source, TaskContext()), original)
+        self.assertIn(str(source), page.watcher.directories())
+        self.assertTrue(page.move_button.isEnabled())
+        page.pause_move_watches()
+        try:
+            page.update_watches([str(source)])
+            self.window.today_page.watch([str(source)])
+            self.assertFalse(page.watcher.directories())
+            self.assertFalse(self.window.today_page.watcher.directories())
+        finally:
+            page.restore_move_watches()
+
+    def test_legacy_archive_opens_clear_continuation_dialog_and_preserves_original(self):
+        import json
+        # Convert an isolated numbered archive into a valid historical fixture.
+        page = self.window.project_page
+        self.until(lambda: not self.window.today_page.worker)
+        page.pause_move_watches()
+        try:
+            original = self.workspace.move(self.workspace.plan_move(self.project["project_id"], False, TaskContext()), "fixture", TaskContext())
+        finally:
+            page.restore_move_watches()
+        path = Path(original["directory"])
+        data = self.workspace.registry()
+        item = data["projects"][0]
+        old_id = item["id"]
+        item.update(id="L-每日工作", legacy=True)
+        status = path / "agent/STATUS.md"
+        status.write_text(status.read_text(encoding="utf-8").replace(old_id, item["id"]), encoding="utf-8")
+        self.workspace.registry_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        before = self.workspace.manifest(path, TaskContext())
+        self.window.navigation.setCurrentRow(self.window.PROJECT)
+        page = self.window.project_page
+        page.filter.setCurrentIndex(1)
+        page.refresh()
+        self.until(lambda: page.selected() and page.selected().get("legacy") and bool(page.status_text))
+        page.update_selection_actions()
+        self.assertEqual(page.more_actions[page.move_button].text(), "从旧归档继续…")
+        self.assertTrue(page.more_actions[page.move_button].isEnabled())
+        def fill(dialog):
+            self.assertIn("从旧归档继续", dialog.windowTitle())
+            self.assertEqual(dialog.name.text(), "每日工作-接续")
+            self.assertIn(str(path), dialog.goal.toPlainText())
+            dialog.entry.setChecked(False)
+            return QDialog.DialogCode.Accepted
+        with patch("agent_manager.ui.projects.ProjectDialog.exec", fill), patch.object(QMessageBox, "information"):
+            page.more_actions[page.move_button].trigger()
+            self.until(lambda: page.selected() and page.selected()["name"] == "每日工作-接续" and bool(page.status_text))
+        self.assertTrue(page.selected()["id"].startswith("P-"))
+        self.assertEqual(self.workspace.manifest(path, TaskContext()), before)
+        self.assertTrue(self.workspace.project("L-每日工作")["legacy"])
 
     def test_scoped_resource_create_inherits_project_and_survives_previous_filters(self):
         self.window.navigation.setCurrentRow(self.window.PROJECT)

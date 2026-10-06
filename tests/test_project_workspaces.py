@@ -122,7 +122,23 @@ class ProjectWorkspaceTests(unittest.TestCase):
                 self.workspace.move(plan, "归档", self.context)
         self.assertTrue(Path(plan["target"]).exists())
         receipt = next((self.root / "agent/history").glob("*-move.json"))
-        self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["state"], "prepared")
+        record = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertEqual(record["state"], "needs_review")
+        self.assertEqual(record["phase"], "update_indexes")
+        self.assertIn("injected index failure", record["error"])
+
+    def test_failure_before_rename_verifies_original_files_and_records_error(self):
+        project = self.create()
+        plan = self.workspace.plan_move(project["project_id"], False, self.context)
+        with patch("agent_manager.project_workspaces.os.rename", side_effect=PermissionError("directory occupied")):
+            with self.assertRaisesRegex(UserError, "目录未移动"):
+                self.workspace.move(plan, "归档", self.context)
+        self.assertEqual(self.workspace.manifest(Path(plan["source"]), self.context), plan["records"])
+        self.assertFalse(Path(plan["target"]).exists())
+        record = json.loads(next((self.root / "agent/history").glob("*-move.json")).read_text(encoding="utf-8"))
+        self.assertEqual(record["state"], "failed_before_move")
+        self.assertEqual(record["phase"], "rename_directory")
+        self.assertIn("directory occupied", record["error"])
 
 
 if __name__ == "__main__":

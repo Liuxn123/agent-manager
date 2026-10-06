@@ -44,6 +44,10 @@ Qt 文件监听、短防抖、窗口重新激活与日期切换触发后台读�
 
 ## UI
 
+v0.7.5 ProjectPage 在目录移动前暂停窗口拥有的 QFileSystemWatcher（包括隐藏 Today 的项目监听）。watch / update_watches 在暂停标记期间拒绝迟到读取回调注册路径；MainWindow 的 task_completed 信号在任务结果处理结束后统一释放暂停，成功后按新路径刷新，失败 / 取消同样恢复。后台业务移动仍由既有 Worker、资源锁与工作区锁执行。旧 L-归档只使用既有 create 初始化接续项目，历史目录保持原位；不增加登记字段。
+
+移动回执兼容旧 prepared / completed，失败新增 failed_before_move（未 rename 且来源清单一致）或 needs_review，并记录 phase、error_type、error、winerror；不自动回滚已移动目录。
+
 v0.7.4 复用 Daily 按日期文件作为唯一真源。Agenda 是只读跨日期索引，按 stat 缓存、限制文件 / 总大小 / 显示条数、逐文件报告错误；只在打开总览或文件事件 / 手动刷新时后台读取，不增加全局轮询。ui/agenda.py 提供总览二级弹窗，打开日期后仍使用 TodayPage 的原编辑 / 勾选与 CAS 写入。未完成任务不自动改日期。
 
 TodayPage 区分系统今日与当前浏览日期，跨午夜只推进原本停留在今天的视图；后台返回必须匹配日期与当前资料路径，避免快速切换日期后旧响应显示为新日期。添加 / 编辑捕获目标日期、路径与原文，写入仍走原 Worker。新增任意日期选择不改变 Markdown / SQLite / projects.json / .amb schema。
