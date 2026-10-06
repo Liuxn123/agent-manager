@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from ..domain import UserError
 from ..project_workspaces import ProjectWorkspace
 from ..runtime import TaskContext
 from ..storage import now
-from ..workbench import Agenda, Daily, Catalog, TYPES, work_root, markdown_uri, project_context, task_details
+from ..workbench import Agenda, Daily, Catalog, TYPES, work_root, markdown_uri, project_context
 from .components import FlowLayout
 from .tasks import ReadWorker
 from .presentation import readable_time
@@ -30,14 +29,14 @@ def control(text, action, primary=False):
     return widget
 
 
-def edit_markdown(parent, title, text):
+def edit_markdown(parent, title, text, hint="编辑同一份 Markdown；保存时若原文件已改变，会提示刷新。"):
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
     dialog.resize(760, 620)
     layout = QVBoxLayout(dialog)
-    hint = QLabel("编辑同一份 Markdown；保存时若原文件已改变，会提示刷新。")
-    hint.setWordWrap(True)
-    layout.addWidget(hint)
+    hint_label = QLabel(hint)
+    hint_label.setWordWrap(True)
+    layout.addWidget(hint_label)
     editor = QTextEdit()
     editor.setAcceptRichText(False)
     editor.setPlainText(text)
@@ -145,7 +144,6 @@ class TodayPage(MarkdownPage):
         self.project_errors = []
         self.todo_index = None
         self.todo_root = None
-        self.focus_elapsed, self.focus_started = 0.0, None
         self.narrow = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -171,16 +169,12 @@ class TodayPage(MarkdownPage):
         self.today_button = control("回到今天", lambda: self.set_day(date.today()))
         note.addWidget(self.today_button)
         note.addStretch()
-        self.focus_button = control("开始专注", self.toggle_focus)
-        self.focus_button.setToolTip("手动开始 / 暂停；只计本次打开的专注时间，不采集 Agent 使用时长。")
-        self.focus_button.setObjectName("FocusButton")
-        note.addWidget(self.focus_button)
         layout.addLayout(note)
         self.metric_grid = QGridLayout()
         self.metric_grid.setSpacing(12)
         self.metrics = [Metric(title, color, icon, hint) for title, color, icon, hint in zip(
-            ("今日任务", "高优先级", "需要处理", "推进项目"), COLORS, (9, 10, 11, 3),
-            ("勾选即保存", "未完成的重点任务", "项目与资料提醒", "点击项目继续"))]
+            ("今日要做", "需要处理", "推进项目"), (COLORS[0], COLORS[2], COLORS[3]), (9, 11, 3),
+            ("勾选即保存", "项目与资料提醒", "点击项目继续"))]
         self.metrics[0].add_progress()
         for i, widget in enumerate(self.metrics):
             self.metric_grid.addWidget(widget, 0, i)
@@ -267,9 +261,6 @@ class TodayPage(MarkdownPage):
         self.clock_timer.setInterval(2_000)
         self.clock_timer.timeout.connect(self.check_day)
         self.clock_timer.start()
-        self.focus_timer = QTimer(self)
-        self.focus_timer.setInterval(1_000)
-        self.focus_timer.timeout.connect(self.update_focus)
         self.arrange_columns()
 
     def arrange_columns(self):
@@ -288,28 +279,14 @@ class TodayPage(MarkdownPage):
         for i, widget in enumerate(self.metrics):
             widget.icon.setVisible(not narrow)
             self.metric_grid.addWidget(widget, i // 2 if stacked else 0, i % 2 if stacked else i)
+        visible_columns = 2 if stacked else len(self.metrics)
         for i in range(4):
-            self.metric_grid.setColumnStretch(i, 1 if not stacked or i < 2 else 0)
+            self.metric_grid.setColumnStretch(i, 1 if i < visible_columns else 0)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "columns"):
             self.arrange_columns()
-
-    def toggle_focus(self):
-        if self.focus_started is None:
-            self.focus_started = time.monotonic()
-            self.focus_timer.start()
-        else:
-            self.focus_elapsed += time.monotonic() - self.focus_started
-            self.focus_started = None
-            self.focus_timer.stop()
-        self.update_focus()
-
-    def update_focus(self):
-        elapsed = self.focus_elapsed + (time.monotonic() - self.focus_started if self.focus_started is not None else 0)
-        minutes, seconds = divmod(int(elapsed), 60)
-        self.focus_button.setText(("暂停专注" if self.focus_started is not None else "开始专注") + (f" · {minutes:02d}:{seconds:02d}" if elapsed else ""))
 
     def add_entry(self, section, day=None, parent=None):
         if not self.report:
@@ -319,13 +296,13 @@ class TodayPage(MarkdownPage):
         entry_section = "今日任务" if is_todo else section
         dialog = DailyEntryDialog(parent or self, section, day or (date.today() if is_todo else self.day))
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, priority, clock = dialog.values()
+            title, clock = dialog.values()
             target_day = dialog.date.date().toPython()
             target = Daily(daily.files.root, target_day)
             def append(context):
                 snapshot = expected if target_day == daily.day else target.load()["original"]
                 context.checkpoint()
-                return target.add_entry(entry_section, title, snapshot, priority, clock)
+                return target.add_entry(entry_section, title, snapshot, time=clock)
             self.window.submit(None, "添加 Todo" if is_todo else "添加" + ("任务" if section == "今日任务" else "日程"),
                 append, lambda _: self.refresh() if is_todo else self.set_day(target_day), persist_result=False)
 
@@ -368,10 +345,6 @@ class TodayPage(MarkdownPage):
         if self.actual_today != date.today():
             following_today = self.day == self.actual_today
             self.actual_today = date.today()
-            self.focus_elapsed = 0.0
-            if self.focus_started is not None:
-                self.focus_started = time.monotonic()
-            self.update_focus()
             if following_today:
                 self.set_day(self.actual_today)
             else:
@@ -473,14 +446,10 @@ class TodayPage(MarkdownPage):
         count = len(report["tasks"])
         done = sum(row["done"] for row in report["tasks"])
         self.task_card.title.setText(("今日要做" if self.day == date.today() else "当日要做") + f"  ({done}/{count})")
-        self.daily_hint.setText("点复选框即保存 · 双击编辑 · 与 Obsidian 共用")
+        self.daily_hint.setText("勾选即保存 · 与 Todo 共用每日 Markdown")
         self.metrics[0].value.setText(f"{done} / {count}")
         self.metrics[0].progress.setValue(round(done * 100 / count) if count else 0)
         self.metrics[0].note.setText(f"已完成 {round(done * 100 / count)}%" if count else "添加第一项任务")
-        outstanding = [row for row in report["tasks"] if not row["done"]]
-        high = sum(task_details(row["text"])["priority"] == "高" for row in outstanding)
-        self.metrics[1].value.setText(str(high) + " 项")
-        self.metrics[1].note.setText("需要优先完成" if high else "没有高优先级任务")
         self.edit_button.setEnabled(True)
         if not self.window.jobs:
             self.tasks.setEnabled(True)
@@ -506,8 +475,8 @@ class TodayPage(MarkdownPage):
         if not self.continue_projects.count():
             self.continue_projects.addItem("暂无待继续项目。在“项目”中选择工作区或新建项目。")
         self.continue_projects.fit(4)
-        self.metrics[3].value.setText(str(len(active)) + " 个")
-        self.metrics[3].note.setText("双击卡片继续工作" if active else "选择工作区或创建项目")
+        self.metrics[2].value.setText(str(len(active)) + " 个")
+        self.metrics[2].note.setText("双击卡片继续工作" if active else "选择工作区或创建项目")
         recent = sorted(self.projects, key=lambda p: (self.window.store.evidence("project-used:" + p["id"]) or {}).get("at", ""), reverse=True)
         self.recent_projects.clear()
         for row in recent[:4]:
@@ -558,8 +527,8 @@ class TodayPage(MarkdownPage):
         if not count:
             self.attention.addItem("目前没有需要处理的异常。")
         self.attention.fit(3)
-        self.metrics[2].value.setText(str(count) + " 项")
-        self.metrics[2].note.setText("双击查看具体事项" if count else "暂无待处理异常")
+        self.metrics[1].value.setText(str(count) + " 项")
+        self.metrics[1].note.setText("双击查看具体事项" if count else "暂无待处理异常")
         self.attention_card.title.setText("需要处理" + (f"  ({count})" if count else ""))
         health = getattr(self.window, "dashboard_health", [])
         rows = [(r, h) for r, h in health if r.kind in {"hermes_local", "agent"}]
@@ -580,7 +549,11 @@ class TodayPage(MarkdownPage):
         if not self.report:
             return
         daily, expected = self.daily(), self.report["original"]
-        text = edit_markdown(self, self.day.isoformat() + " · 日程 / 任务 / 工作记录", self.report["text"])
+        text = edit_markdown(
+            self, self.day.isoformat() + " · 每日计划",
+            self.report["text"],
+            "“今日要做”和截止日期为这一天的 Todo 共用此 Markdown；保存后会刷新两块清单。",
+        )
         if text is not None:
             self.window.submit(None, "保存当日计划", lambda context: daily.save(text, expected), lambda _: self.refresh(), persist_result=False)
 
@@ -650,7 +623,6 @@ class TodayPage(MarkdownPage):
 
     def stop_updates(self):
         self.clock_timer.stop()
-        self.focus_timer.stop()
         super().stop_updates()
 
 

@@ -7,7 +7,7 @@ from datetime import date
 from PySide6.QtCore import Qt, QSize, QRect, QEvent, QDate
 from PySide6.QtGui import QColor, QFont, QPen
 from PySide6.QtWidgets import (QFrame, QLabel, QVBoxLayout, QHBoxLayout, QListWidget,
-    QStyledItemDelegate, QStyle, QDialog, QFormLayout, QLineEdit, QComboBox,
+    QStyledItemDelegate, QStyle, QDialog, QFormLayout, QLineEdit,
     QDialogButtonBox, QPushButton, QProgressBar, QSizePolicy, QDateEdit)
 
 from .components import nav_icon
@@ -186,14 +186,6 @@ class TodayDelegate(QStyledItemDelegate):
             if details["time"]:
                 self.text(painter, QRect(end - 42, rect.y(), 42, rect.height()), details["time"], "#7e8ba3", size=11)
                 end -= 53
-            if details["priority"]:
-                color = {"高": COLORS[1], "中": COLORS[2], "低": COLORS[0]}[details["priority"]]
-                badge = QRect(end - 30, rect.center().y() - 10, 30, 20)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor({"高": "#ffecef", "中": "#fff2df", "低": "#eaf3ff"}[details["priority"]]))
-                painter.drawRoundedRect(badge, 9, 9)
-                self.text(painter, badge.adjusted(9, 0, 0, 0), details["priority"], color, size=11)
-                end -= 40
             self.text(painter, QRect(x + 28, rect.y(), max(10, end - x - 28), rect.height()), details["title"], "#94a0b5" if checked else "#263c60", strike=checked)
         else:
             color = COLORS[1] if self.kind == "alert" else COLORS[0]
@@ -234,10 +226,6 @@ class DailyEntryDialog(QDialog):
         self.title.setMaxLength(240)
         self.title.setPlaceholderText("例如：验证 Hermes 恢复")
         form.addRow("做什么", self.title)
-        self.priority = QComboBox()
-        self.priority.addItems(["普通", "高", "中", "低"])
-        if is_task:
-            form.addRow("优先级", self.priority)
         self.time = QLineEdit()
         if not is_task:
             self.time.setPlaceholderText("可选，例如 09:00–10:00")
@@ -255,7 +243,7 @@ class DailyEntryDialog(QDialog):
         self.title.setFocus()
 
     def values(self):
-        return self.title.text(), "" if self.priority.currentText() == "普通" else self.priority.currentText(), self.time.text()
+        return self.title.text(), self.time.text()
 
 
 class BackupButton(QPushButton):
