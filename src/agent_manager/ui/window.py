@@ -443,7 +443,7 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("Navigation")
         self.navigation.setIconSize(QSize(22, 22))
-        for index, label in zip((0, 3, 4, 6, 5, 7), ("今日", "项目", "Agent", "资源库", "数据安全", "设置")):
+        for index, label in zip((0, 3, 4, 6, 5, 7), ("工作台", "项目", "Agent", "资源库", "数据安全", "设置")):
             self.navigation.addItem(QListWidgetItem(nav_icon(index), label))
         sidebar_layout.addWidget(self.navigation, 1)
         help_button = button("使用说明", self.show_guide)
@@ -1544,7 +1544,7 @@ class MainWindow(QMainWindow):
 
     def page_changed(self, index: int) -> None:
         self.update_task_timer()
-        if index == self.TODAY:
+        if index == self.TODAY and not self.today_page.loaded_once:
             self.today_page.refresh()
         elif index == self.PROJECT:
             self.project_page.refresh()

@@ -55,13 +55,14 @@ class MarkdownPage(QWidget):
     def __init__(self, window):
         super().__init__()
         self.window, self.worker, self.closed, self.pending = window, None, False, False
+        self.auto_refresh = True
         self.watcher = QFileSystemWatcher(self)
         self.reload_timer = QTimer(self)
         self.reload_timer.setSingleShot(True)
         self.reload_timer.setInterval(350)
-        self.reload_timer.timeout.connect(lambda: self.refresh() if self.isVisible() else None)
-        self.watcher.fileChanged.connect(lambda *_: self.reload_timer.start())
-        self.watcher.directoryChanged.connect(lambda *_: self.reload_timer.start())
+        self.reload_timer.timeout.connect(lambda: self.refresh() if self.auto_refresh and self.isVisible() else None)
+        self.watcher.fileChanged.connect(lambda *_: self.reload_timer.start() if self.auto_refresh else None)
+        self.watcher.directoryChanged.connect(lambda *_: self.reload_timer.start() if self.auto_refresh else None)
         window.installEventFilter(self)
 
     def read_background(self, operation, apply):
@@ -86,7 +87,11 @@ class MarkdownPage(QWidget):
                 apply(report)
             if self.pending:
                 self.pending = False
-                self.reload_timer.start()
+                if self.auto_refresh:
+                    self.reload_timer.start()
+                else:
+                    self.reload_timer.stop()
+                    QTimer.singleShot(0, self.refresh)
         worker.signals.finished.connect(finished)
         self.window.pool.start(worker)
 
@@ -97,6 +102,10 @@ class MarkdownPage(QWidget):
         if self.watcher.property("projectMovePaused"):
             return
         previous = self.watcher.files() + self.watcher.directories()
+        if not self.auto_refresh:
+            if previous:
+                self.watcher.removePaths(previous)
+            return
         available = []
         for value in paths:
             path = Path(value)
@@ -112,7 +121,7 @@ class MarkdownPage(QWidget):
             self.watcher.addPaths(added)
 
     def eventFilter(self, watched, event):
-        if watched is self.window and event.type() == QEvent.Type.WindowActivate and self.isVisible() and not self.closed:
+        if self.auto_refresh and watched is self.window and event.type() == QEvent.Type.WindowActivate and self.isVisible() and not self.closed:
             self.reload_timer.start()
         return super().eventFilter(watched, event)
 
@@ -138,9 +147,11 @@ class MarkdownPage(QWidget):
 class TodayPage(MarkdownPage):
     def __init__(self, window):
         super().__init__(window)
+        self.auto_refresh = False
         self.setObjectName("TodayPage")
         self.day, self.report, self.projects = date.today(), None, []
-        self.actual_today = self.day
+        self.follow_today = True
+        self.loaded_once = False
         self.project_errors = []
         self.todo_index = None
         self.todo_root = None
@@ -156,6 +167,9 @@ class TodayPage(MarkdownPage):
         top.addWidget(self.agenda_button)
         self.edit_button = control("编辑今日计划", self.edit_today, True)
         top.addWidget(self.edit_button)
+        self.refresh_button = control("刷新", self.manual_refresh)
+        self.refresh_button.setToolTip("读取 Markdown / Obsidian 最新内容")
+        top.addWidget(self.refresh_button)
         layout.addLayout(top)
         note = QHBoxLayout()
         note.addWidget(control("‹", lambda: self.set_day(self.day - timedelta(days=1))))
@@ -257,10 +271,6 @@ class TodayPage(MarkdownPage):
         right.addStretch()
         self.scroll.setWidget(self.body)
         layout.addWidget(self.scroll, 1)
-        self.clock_timer = QTimer(self)
-        self.clock_timer.setInterval(2_000)
-        self.clock_timer.timeout.connect(self.check_day)
-        self.clock_timer.start()
         self.arrange_columns()
 
     def arrange_columns(self):
@@ -307,6 +317,7 @@ class TodayPage(MarkdownPage):
                 append, lambda _: self.refresh() if is_todo else self.set_day(target_day), persist_result=False)
 
     def set_day(self, day):
+        self.follow_today = day == date.today()
         if day != self.day:
             self.day = day
             self.report = None
@@ -341,26 +352,17 @@ class TodayPage(MarkdownPage):
     def daily(self):
         return Daily(work_root(self.window.store), self.day)
 
-    def check_day(self):
-        if self.actual_today != date.today():
-            following_today = self.day == self.actual_today
-            self.actual_today = date.today()
-            if following_today:
-                self.set_day(self.actual_today)
-            else:
-                self.refresh()
-        elif self.isVisible() and self.report and not self.worker:
-            # macOS may coalesce or miss notifications after an atomic editor save.
-            # Check only today's small file, never rescan all projects on this timer.
-            daily = Daily(self.notes_root, self.day)
-            def changed(report):
-                if self.report and self.matches_day(report) and report["original"] != self.report["original"]:
-                    self.render_daily(report)
-            self.read_background(lambda context: daily.load(), changed)
+    def manual_refresh(self):
+        today = date.today()
+        if self.follow_today and self.day != today:
+            self.set_day(today)
+        else:
+            self.refresh()
 
     def refresh(self):
         if self.closed:
             return
+        self.loaded_once = True
         self.heading.setText(self.day.strftime("%Y 年 %m 月 %d 日") + " · " + "星期" + "一二三四五六日"[self.day.weekday()])
         is_today = self.day == date.today()
         self.edit_button.setText("编辑今日计划" if is_today else "编辑当日计划")
@@ -622,7 +624,6 @@ class TodayPage(MarkdownPage):
         dialog.exec()
 
     def stop_updates(self):
-        self.clock_timer.stop()
         super().stop_updates()
 
 
