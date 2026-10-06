@@ -391,7 +391,7 @@ class TodayPage(MarkdownPage):
                     listing = {"projects": []}
                     errors.append("项目工作区需要检查：" + str(exc))
                 for item in listing["projects"]:
-                    if item["path"].startswith("archive/"):
+                    if item["state"] == "archived" or item.get("legacy"):
                         continue
                     try:
                         doc = workspace.document(item["id"], "agent/STATUS.md")

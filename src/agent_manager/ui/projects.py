@@ -282,7 +282,11 @@ class ProjectPage(QWidget):
                 self.log_view = ProjectLogView(view)
                 self.documents.addTab(self.log_view, "日志")
             elif name == "当前状态":
-                self.overview = ProjectOverview(view)
+                self.overview = ProjectOverview(view, self.edit_status, {
+                    "goals": self.edit_status, "progress": self.edit_status,
+                    "summary": self.write_stage_summary, "next": self.edit_tasks,
+                    "risks": self.edit_status, "recent": self.append_log,
+                })
                 self.documents.addTab(self.overview, name)
             else:
                 self.documents.addTab(view, "任务" if name == "任务入口" else name)
@@ -582,7 +586,7 @@ class ProjectPage(QWidget):
         selected = self.selected()
         query = self.search.text().strip().casefold()
         mode = self.filter.currentData()
-        self.rows = [p for p in self.project_rows if query in (p["id"] + " " + p["name"]).casefold() and (mode == "all" or p["path"].startswith("archive/") == (mode == "archived"))]
+        self.rows = [p for p in self.project_rows if query in (p["id"] + " " + p["name"]).casefold() and (mode == "all" or (p["state"] == "archived" or p.get("legacy")) == (mode == "archived"))]
         self.list_title.setText(f"项目列表 · {len(self.rows)}")
         self.table.blockSignals(True)
         self.table.setRowCount(len(self.rows))
@@ -602,13 +606,17 @@ class ProjectPage(QWidget):
     def update_selection_actions(self, *_):
         item = self.selected()
         enabled = bool(item) and not self.move_watchers
-        archived = bool(item and item["path"].startswith("archive/"))
+        archived = bool(item and (item["state"] == "archived" or item.get("legacy")))
         self.open_button.setEnabled(enabled)
         self.resource_button.setEnabled(enabled)
         self.obsidian_button.setEnabled(enabled and (self.documents.currentIndex() != 3 or self.note_list.currentItem() is not None))
         self.new_note_button.setEnabled(enabled and not archived)
         self.log_button.setEnabled(enabled and not archived and not self.document_errors.get(2))
         self.edit_button.setEnabled(enabled and not archived and self.documents.currentIndex() < 2 and not self.document_errors.get(self.documents.currentIndex()))
+        self.overview.edit_button.setEnabled(enabled and not archived and not self.document_errors.get(0))
+        for key, button in self.overview.action_buttons.items():
+            source_index = 1 if key == "next" else 2 if key in {"summary", "recent"} else 0
+            button.setEnabled(enabled and not archived and not self.document_errors.get(source_index))
         self.move_button.setEnabled(enabled)
         self.move_button.setText("从旧归档继续…" if item and item.get("legacy") else "重新启用…" if archived else "归档项目…")
         self.stage_button.setEnabled(enabled and not archived and bool(self.status_text) and not self.document_errors.get(0))
@@ -792,7 +800,7 @@ class ProjectPage(QWidget):
 
     def create_note(self):
         item = self.selected()
-        if not item or item["path"].startswith("archive/"):
+        if not item or item["state"] == "archived":
             return
         title, accepted = QInputDialog.getText(self, "新建项目笔记", "笔记名称（保存到项目的“笔记”目录）：")
         if not accepted:
@@ -881,18 +889,26 @@ class ProjectPage(QWidget):
             self.submit("追加项目日志与交接", lambda context: workspace.append_log(item["id"], note, context), lambda report: self.selection_changed(), persist_result=False)
 
     def edit_document(self):
+        self._edit_document(self.documents.currentIndex())
+
+    def edit_status(self):
+        self._edit_document(0)
+
+    def edit_tasks(self):
+        self._edit_document(1)
+
+    def _edit_document(self, index):
         item = self.selected()
-        index = self.documents.currentIndex()
         if not item or index > 1:
             return
         workspace = self.workspace()
         relative = self.document_paths[index]
         def loaded(report):
             dialog = QDialog(self)
-            dialog.setWindowTitle(item["name"] + " · " + self.documents.tabText(index))
+            dialog.setWindowTitle(item["name"] + " · " + ("当前状态" if index == 0 else "任务入口"))
             dialog.resize(760, 590)
             layout = QVBoxLayout(dialog)
-            layout.addWidget(QLabel("编辑原管理文档，保留 project_id；归档使用专用按钮，不复制第二份状态。"))
+            layout.addWidget(QLabel("直接编辑项目原 Markdown；保存后状态卡片和 Obsidian 同步更新。保留 project_id。"))
             editor = QTextEdit()
             editor.setPlainText(report["text"])
             layout.addWidget(editor)
@@ -914,43 +930,18 @@ class ProjectPage(QWidget):
             self.create_project(legacy=item)
             return
         workspace = self.workspace()
-        resume = item["path"].startswith("archive/")
-        def preview(plan):
-            dialog = QDialog(self)
-            dialog.setWindowTitle("重新启用预检" if resume else "归档预检")
-            dialog.resize(690, 460)
-            layout = QVBoxLayout(dialog)
-            report = QLabel(f"项目：{item['name']}（{item['id']}）\n\n从：{plan['source']}\n到：{plan['target']}\n\n已检查 {plan['file_count']} 个文件；保留编号并更新 Obsidian 入口和索引。")
-            report.setWordWrap(True)
-            layout.addWidget(report)
-            reason = QTextEdit()
-            reason.setPlaceholderText("重新启用后的下一步" if resume else "归档原因、交付物和遗留事项；未完成可以如实归档")
-            layout.addWidget(reason)
-            confirm = QCheckBox("已停止项目写入，并核对备份、遗留事项、旧路径及 Git / 同步设置")
-            layout.addWidget(confirm)
-            note = QLabel("归档只是移动，不是备份；备份未验证时照实保留记录。业务代码中的绝对路径不会自动改写。")
-            note.setWordWrap(True)
-            layout.addWidget(note)
-            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-            buttons.button(QDialogButtonBox.StandardButton.Ok).setText("重新启用" if resume else "归档项目")
-            buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
-            def enabled():
-                buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(confirm.isChecked() and bool(reason.toPlainText().strip()))
-            confirm.toggled.connect(enabled)
-            reason.textChanged.connect(enabled)
-            buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject)
-            layout.addWidget(buttons)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                text = reason.toPlainText()
-                self.pause_move_watches()
-                self.move_selection = (item["id"], resume)
-                try:
-                    self.move_task = self.submit("重新启用项目" if resume else "归档项目", lambda context: workspace.move(plan, text, context)) or ""
-                finally:
-                    if not self.move_task:
-                        self.restore_move_watches()
-        self.submit("重新启用预检" if resume else "项目归档预检", lambda context: workspace.plan_move(item["id"], resume, context), preview, persist_result=False)
+        resume = item["state"] == "archived"
+        action = "重新启用" if resume else "归档"
+        message = (f"{action}“{item['name']}”吗？\n\n只修改 STATUS.md 中的项目状态。项目文件夹、编号和 Obsidian 链接保持原位。"
+                   if not item.get("legacy") else "旧归档不会被移动或覆盖；将按项目规范创建一个新的编号项目继续使用。")
+        if QMessageBox.question(self, action + "项目", message) != QMessageBox.StandardButton.Yes:
+            return
+        def completed(_report):
+            self.filter.setCurrentIndex(0 if resume else 1)
+            self.preferred_project = item["id"]
+            self.refresh()
+            self.window.today_page.refresh()
+        self.submit(action + "项目", lambda context: workspace.set_archived(item["id"], not resume, context), completed)
 
     def pause_move_watches(self):
         # Windows directory notification handles prevent rename. Today also

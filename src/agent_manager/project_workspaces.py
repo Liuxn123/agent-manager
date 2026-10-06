@@ -52,6 +52,23 @@ def replace_state(text: str, state: str) -> str:
     return "---" + front + "---" + body
 
 
+def lifecycle_state(text: str) -> str:
+    """Read the project lifecycle from STATUS rather than inferring it from its folder."""
+    return field(text, "status")
+
+
+def replace_frontmatter_value(text: str, name: str, value: str | None) -> str:
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", text, re.S)
+    if not match:
+        raise UserError("STATUS 缺少有效 frontmatter。")
+    front = match.group(1)
+    pattern = r"(?m)^" + re.escape(name) + r":[^\r\n]*\r?\n?"
+    front = re.sub(pattern, "", front)
+    if value is not None:
+        front = front.rstrip("\r\n") + f"\n{name}: {value}\n"
+    return "---\n" + front.rstrip("\r\n") + "\n---" + text[match.end():]
+
+
 class ProjectWorkspace:
     def __init__(self, root: Path):
         selected = Path(os.path.abspath(root.expanduser()))
@@ -184,6 +201,42 @@ class ProjectWorkspace:
             rows.append({**project, "directory": str(path), "state": state, "error": error})
         return {"projects": rows, "workspace": str(self.root)}
 
+    def set_archived(self, identity: str, archived: bool, context: TaskContext) -> dict:
+        """Archive by changing STATUS only; project and Obsidian paths remain stable."""
+        with self.lock("ArchiveStatus" if archived else "ResumeStatus"):
+            item = self.project(identity)
+            if item.get("legacy"):
+                raise UserError("旧归档资料请使用‘从旧归档继续’创建新项目。")
+            status_path = self.path(item["path"] + "/agent/STATUS.md")
+            before = self.read(status_path)
+            state = lifecycle_state(before)
+            if field(before, "project_id") != identity or state not in STATES:
+                raise UserError("项目状态或编号需要检查，未执行归档操作。")
+            registry = self.registry()
+            self.index_outputs(registry)  # Refuse the lifecycle change if managed index blocks are invalid.
+            if archived:
+                if state == "archived":
+                    raise UserError("项目已经归档。")
+                after = replace_state(before, "archived")
+                after = replace_frontmatter_value(after, "archived_from", state)
+            else:
+                if state != "archived":
+                    raise UserError("项目当前不是已归档状态。")
+                prior = "active"
+                try:
+                    recorded = field(before, "archived_from")
+                    if recorded in set(STATES) - {"archived"}:
+                        prior = recorded
+                except UserError:
+                    pass  # Older archives did not store their previous lifecycle state.
+                after = replace_frontmatter_value(before, "archived_from", None)
+                after = replace_state(after, prior)
+            context.checkpoint()
+            self.write(status_path, after, before)
+            self.update_indexes(registry)
+        return {"project_id": identity, "state": "archived" if archived else prior,
+                "path": str(self.path(item["path"])), "moved": False}
+
     def document(self, identity: str, relative: str) -> dict:
         if relative not in MANAGEMENT_FILES:
             raise UserError("只允许打开项目管理文档。")
@@ -217,7 +270,7 @@ class ProjectWorkspace:
             raise UserError("请填写有效笔记名称，不包含路径或文件名保留字符。")
         with self.lock("NewNote"):
             item = self.project(identity)
-            if item["path"].startswith("archive/"):
+            if lifecycle_state(self.read(self.path(item["path"] + "/agent/STATUS.md"))) == "archived":
                 raise UserError("归档项目先重新启用，再新建笔记。")
             folder = self.path(item["path"] + "/笔记")
             path = self.path(item["path"] + "/笔记/" + title + ".md")
@@ -323,7 +376,7 @@ class ProjectWorkspace:
                 raise UserError("项目状态字段不合规，停止更新索引。")
             entry = "[[" + item["vault_entry"][len("myself/"):] + "/README]]" if item.get("vault_entry") else "无"
             context_link = "纯文本路径；不建 Vault 链接" if item["link_policy"] == "plain-text" else "[Agent 接续](" + (self.root / item["path"] / "agent/README.md").as_uri() + ")"
-            rows[item["path"].split("/")[0]].append(f"| {item['name']} | {item['id']} | {state} | {entry} | `{self.root / item['path']}` | {context_link} |")
+            rows["archive" if state == "archived" or item.get("legacy") else "projects"].append(f"| {item['name']} | {item['id']} | {state} | {entry} | `{self.root / item['path']}` | {context_link} |")
         outputs = []
         for area, title in (("projects", "项目总览"), ("archive", "归档项目索引")):
             path = self.path("myself/03-项目/" + title + ".md")
@@ -356,7 +409,7 @@ class ProjectWorkspace:
             raise UserError("请填写日志内容（不超过 20000 个字符）。")
         with self.lock("Log"):
             item = self.project(identity)
-            if item["path"].startswith("archive/"):
+            if lifecycle_state(self.read(self.path(item["path"] + "/agent/STATUS.md"))) == "archived":
                 raise UserError("归档项目先重新启用；阅读历史不会修改归档。")
             path = self.path(item["path"] + "/agent/HANDOFF.md")
             before = self.read(path)
@@ -369,7 +422,7 @@ class ProjectWorkspace:
             raise UserError("只允许编辑当前状态和任务入口，内容不超过 100000 字符。")
         with self.lock("Edit"):
             item = self.project(identity)
-            if item["path"].startswith("archive/"):
+            if lifecycle_state(self.read(self.path(item["path"] + "/agent/STATUS.md"))) == "archived":
                 raise UserError("请先重新启用归档项目。")
             if field(text, "project_id") != identity:
                 raise UserError("请保留文档中的 project_id。")

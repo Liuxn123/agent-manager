@@ -1,4 +1,8 @@
-# v0.7.3 架构
+# Agent 管家 v0.8.0 架构
+
+v0.8.0 项目归档 / 重新启用通过带管理锁的 `ProjectWorkspace.set_archived` 修改 STATUS 状态，不移动项目目录、不改变 projects.json 路径或 Obsidian 联接。Frontmatter 的 `archived_from` 暂存归档前状态，重新启用时恢复；旧归档缺少该字段时回到 active。项目归类、索引和工作台过滤均读取 STATUS lifecycle，因此兼容仍位于旧 `archive/` 目录的编号项目。旧移动方法保留供兼容，不再由此 UI 流程调用。
+
+v0.8.0 项目状态概览将卡片操作直连真实数据源：目标 / 进展 / 风险编辑原 `agent/STATUS.md`，下一步编辑原 `agent/TASKS.md`，总结与日志继续走 HANDOFF 追加流程；状态标题另提供完整 STATUS 编辑入口。写入仍使用既有 CAS 保存，未创建第二份正文。
 
 v0.7.9 侧栏首页显示为“工作台”。TodayPage 首次展示时加载，之后不监听文件变化、不响应窗口激活自动刷新，也不做日期 / 文件轮询；手动刷新按钮重读资料。应用内任务写入仍通过原成功回调刷新页面。其他 Markdown 页面保留各自的监听策略。
 
@@ -20,7 +24,7 @@ v0.7.6 TodayPage 首页只保留 Todo 与当日任务。Todo 复用 Agenda 对�
 - `application.py` 统一调用 Adapter、资源 / 路径锁、备份、校验、恢复与演练。
 - `adapters/`：本地 Hermes、服务器 Hermes、项目、Vault、通用 Agent。服务器代码仍通过严格 SSH 执行受限操作。
 - `archives.py` / `snapshots.py` / `security.py`：原 .amb schema 1、AES-GCM、SQLite / JSONL 快照、凭据策略与路径防护。
-- `project_workspaces.py`：projects.json schema 2，身份分配、管理锁、STATUS / TASKS / HANDOFF、笔记、索引、归档 / 重新启用。
+- `project_workspaces.py`：projects.json schema 2，身份分配、管理锁、STATUS / TASKS / HANDOFF、笔记、索引；归档 / 重新启用优先通过 STATUS 生命周期字段处理。
 - `portable.py`：配置中程序目录内的路径编码成 @portable，引导 U 盘移动后的解码；外部路径保持外部路径。
 
 ## 日常工作数据

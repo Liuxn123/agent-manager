@@ -79,7 +79,10 @@ class Section(QFrame):
         self.title = label(title, "TodaySectionTitle")
         heading.addWidget(self.title, 1)
         if action:
-            heading.addWidget(link(action, callback))
+            self.action_button = link(action, callback)
+            heading.addWidget(self.action_button)
+        else:
+            self.action_button = None
         self.body.addLayout(heading)
 
 

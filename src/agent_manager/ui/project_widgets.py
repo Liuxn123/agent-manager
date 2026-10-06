@@ -175,12 +175,14 @@ class ProjectHero(QFrame):
 
 class ProjectOverview(QWidget):
     """Card overview and a full source toggle; both use the same loaded documents."""
-    def __init__(self, source):
+    def __init__(self, source, edit_status, actions=None):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
         row.addWidget(label("围绕当前阶段继续工作", "TodayMuted"), 1)
+        self.edit_button = link("编辑项目状态", edit_status)
+        row.addWidget(self.edit_button)
         self.toggle = link("查看状态原文", self.toggle_source)
         row.addWidget(self.toggle)
         layout.addLayout(row)
@@ -192,10 +194,14 @@ class ProjectOverview(QWidget):
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(10)
         self.cards, self.previews = [], {}
-        for key, title, icon in (("goals", "目标与验收", 15), ("progress", "当前进展", 6),
-                ("summary", "本阶段总结", 9), ("next", "下一步行动", 14),
-                ("risks", "风险 / 待确认", 11), ("recent", "最近记录", 13)):
-            card = Section(title, icon)
+        self.action_buttons = {}
+        actions = actions or {}
+        for key, title, icon, action_title in (("goals", "目标与验收", 15, "编辑"), ("progress", "当前进展", 6, "编辑"),
+                ("summary", "本阶段总结", 9, "写总结"), ("next", "下一步行动", 14, "编辑"),
+                ("risks", "风险 / 待确认", 11, "编辑"), ("recent", "最近记录", 13, "写日志")):
+            card = Section(title, icon, action_title if key in actions else None, actions.get(key))
+            if card.action_button:
+                self.action_buttons[key] = card.action_button
             view = QTextBrowser()
             view.setObjectName("ProjectPreview")
             view.setOpenExternalLinks(True)

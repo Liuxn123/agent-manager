@@ -1,3 +1,3 @@
 """Personal Agent Manager. Runtime data is never stored in the source tree."""
 
-__version__ = "0.7.9"
+__version__ = "0.8.0"
