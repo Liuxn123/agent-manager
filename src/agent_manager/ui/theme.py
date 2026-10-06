@@ -115,4 +115,16 @@ QLabel#ProjectIcon { background: #3979ff; border-radius: 12px; }
 QLabel#ProjectNext { color: #345a92; font-size: 13px; }
 QLabel#ProjectMetricValue { color: #17305c; font-size: 18px; font-weight: 700; }
 QTextBrowser#ProjectPreview { border: none; background: transparent; padding: 2px; color: #405575; }
+QWidget#AgentPage { background: #f5f6fb; }
+QWidget#AgentPage QLabel#Title { font-size: 28px; }
+QWidget#AgentPage QFrame#AgentHero { background: #ffffff; border: 1px solid #e7ecf5; border-radius: 14px; }
+QWidget#AgentPage QLabel#AgentIcon { background: #eaf2ff; color: #3979ff; border-radius: 14px; font-size: 27px; font-weight: 700; }
+QWidget#AgentPage QLabel#AgentName { color: #162c53; font-size: 23px; font-weight: 700; }
+QWidget#AgentPage QLabel#AgentMeta, QWidget#AgentPage QLabel#AgentPath { color: #71809e; }
+QWidget#AgentPage QListWidget#AgentListing { border: 1px solid #e8ebf4; border-radius: 12px; padding: 5px; }
+QWidget#AgentPage QListWidget#AgentListing::item { padding: 10px 12px; border: 1px solid #edf1f8; border-radius: 9px; color: #23395f; }
+QWidget#AgentPage QListWidget#AgentListing::item:selected { background: #edf4ff; border-color: #8eb6ff; color: #173d83; }
+QWidget#AgentPage QListWidget#AgentCompactList { border: none; background: transparent; }
+QWidget#AgentPage QListWidget#AgentCompactList::item { padding: 7px 8px; border-bottom: 1px solid #eef1f6; }
+QWidget#AgentPage QTabBar::tab { padding: 10px 15px; }
 """
