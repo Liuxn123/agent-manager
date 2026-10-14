@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -16,7 +17,7 @@ import yaml
 
 from .domain import UserError
 
-TYPES = {"prompt": "Prompt", "skill": "Skill", "mcp": "MCP", "agent": "Agent", "tool": "工具",
+TYPES = {"prompt": "Prompt", "skill": "Skill", "mcp": "MCP", "api": "API 接口", "agent": "Agent", "tool": "工具",
          "website": "网站", "github": "GitHub 仓库", "article": "文章 / 资料", "template": "模板", "other": "其他"}
 PHASES = ("规划", "进行中", "测试", "收尾", "完成")
 SUMMARY_HEADINGS = ("阶段目标", "完成内容", "验证结果", "遇到的问题", "失败方案", "重要决策", "经验与反思", "下一阶段计划")
@@ -204,29 +205,42 @@ class Daily:
 
     def toggle(self, line, done, expected):
         if expected is None:
-            raise UserError("请先添加今日任务。")
+            raise UserError("每日安排已变化，请刷新后重试。")
         lines = expected.splitlines(keepends=True)
         if not 0 <= line < len(lines) or not re.match(r"^\s*[-*] (?:\[[ xX]\] )?.+", lines[line]):
-            raise UserError("任务位置已改变，请刷新。")
+            raise UserError("日程或任务位置已改变，请刷新。")
         lines[line] = re.sub(r"^(\s*[-*] )(?:\[[ xX]\] )?", lambda m: m[1] + ("[x] " if done else "[ ] "), lines[line])
+        return self.save("".join(lines), expected)
+
+    def remove_entry(self, line, expected_text, expected):
+        """Remove one unchanged daily item while preserving all other Markdown text."""
+        if expected is None:
+            raise UserError("每日安排已变化，请刷新后重试。")
+        lines = expected.splitlines(keepends=True)
+        if not 0 <= line < len(lines):
+            raise UserError("日程或任务位置已改变，请刷新。")
+        match = re.match(r"^\s*[-*] (?:\[[ xX]\] )?(.*)$", lines[line])
+        if not match or match.group(1) != expected_text:
+            raise UserError("日程或任务内容已变化，请刷新后重试。")
+        del lines[line]
         return self.save("".join(lines), expected)
 
 
 class Agenda:
     """Read-only cross-date index of the existing daily files; no migration or database body."""
-    def __init__(self, root):
+    def __init__(self, root, store=None):
         self.files = MarkdownFiles(root)
         self.cache = {}
+        self.store = store
 
     def scan(self, start=None, end=None, *, tasks_only=False, completed=False, context=None):
         if start and end and start > end:
             raise UserError("开始日期不能晚于结束日期。")
         directory = self.files.path("每日")
         result = {"items": [], "errors": [], "watches": [str(directory)]}
-        if not directory.exists():
-            return result
         candidates = []
-        for count, path in enumerate(directory.iterdir()):
+        paths = directory.iterdir() if directory.exists() else ()
+        for count, path in enumerate(paths):
             if context:
                 context.checkpoint()
             if count >= 5000:
@@ -243,6 +257,12 @@ class Agenda:
             candidates.append((day, path))
         budget = 0
         seen = set()
+        migration = self.store.setting("legacy_task_import_v1", {}) if self.store else {}
+        daily_root = str(self.files.root.resolve())
+        imported_files = set(migration.get("daily_files", [])) if migration.get("daily") == daily_root else set()
+        migrated_refs = self.store.planned_task_source_refs() if self.store else set()
+        from collections import defaultdict
+        from .task_migration import legacy_ref
         for count, (day, path) in enumerate(sorted(candidates)):
             if context:
                 context.checkpoint()
@@ -266,8 +286,16 @@ class Agenda:
                     report = cached[1]
                 result["watches"].append(report["path"])
                 sections = [("任务", report["tasks"])] if tasks_only else [("日程", report["schedule"]), ("任务", report["tasks"])]
+                occurrences = defaultdict(int)
                 for kind, rows in sections:
+                    if path.name in imported_files:
+                        continue
                     for row in rows:
+                        db_kind = "schedule" if kind == "日程" else "task"
+                        source_ref = legacy_ref("daily:" + str(self.files.root.resolve()) + ":" + day.isoformat(), db_kind, row["text"], occurrences[(db_kind, row["text"])])
+                        occurrences[(db_kind, row["text"])] += 1
+                        if source_ref in migrated_refs:
+                            continue
                         if kind == "任务" and row["done"] and not completed:
                             continue
                         if len(result["items"]) >= 4000:
@@ -279,6 +307,27 @@ class Agenda:
                 self.cache.pop(path.name, None)
                 result["errors"].append(path.name + "：" + str(exc))
         self.cache = {name: value for name, value in self.cache.items() if name in seen}
+        if self.store:
+            priority_labels = {"high": "高", "medium": "中", "low": "低"}
+            for task in self.store.planned_tasks(limit=5000):
+                if context:
+                    context.checkpoint()
+                day_value = task["due_date"] or ""
+                if day_value and ((start and day_value < start.isoformat()) or (end and day_value > end.isoformat())):
+                    continue
+                if not day_value and (start or end or not tasks_only):
+                    continue
+                if tasks_only and task["kind"] != "task":
+                    continue
+                if not completed and task["status"] == "done":
+                    continue
+                result["items"].append({
+                    "line": -1, "text": task["title"], "title": task["title"],
+                    "done": task["status"] == "done", "priority": priority_labels.get(task["priority"], ""),
+                    "time": "", "day": day_value, "kind": "日程" if task["kind"] == "schedule" else "任务",
+                    "path": "sqlite:" + task["id"], "planned_task_id": task["id"],
+                    "project_id": task["project_id"], "source": task["source"],
+                })
         return result
 
 
@@ -366,6 +415,55 @@ class Catalog:
         text = render_document(metadata, body)
         self.parse(relative, text)
         return self.files.write(relative, text, expected)
+
+    def upload_attachment(self, source, context=None, project_id=""):
+        """Copy a user-selected file into attachments and index it as a resource."""
+        source_path = Path(source).expanduser()
+        if source_path.is_symlink() or getattr(source_path, "is_junction", lambda: False)():
+            raise UserError("请选择普通文件，不能上传符号链接。")
+        try:
+            source_path = source_path.resolve(strict=True)
+        except OSError as exc:
+            raise UserError("所选文件已不存在或无法读取。") from exc
+        if not source_path.is_file():
+            raise UserError("请选择一个文件。")
+
+        relative = "资源/附件/" + source_path.name
+        target = self.files.path(relative)
+        if target.resolve() == source_path:
+            raise UserError("所选文件已经位于资源目录中。")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target = self.files.path(relative)
+        try:
+            with source_path.open("rb") as incoming, target.open("xb") as copied:
+                while True:
+                    if context:
+                        context.checkpoint()
+                    chunk = incoming.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    copied.write(chunk)
+            shutil.copystat(source_path, target)
+        except FileExistsError as exc:
+            raise UserError("资源目录中已存在同名文件，请先改名后再上传。") from exc
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+
+        metadata = {
+            "type": "other",
+            "name": source_path.name[:120],
+            "tags": ["附件"],
+            "summary": "上传文件：" + source_path.name[:120],
+            "attachment_path": relative,
+            "projects": [project_id] if project_id else [],
+        }
+        try:
+            report = self.save(metadata, "此条目关联资源库中的文件副本：" + source_path.name)
+            return {**report, "name": metadata["name"], "attachment_path": relative}
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
 
 
 def project_context(status, state="candidate"):

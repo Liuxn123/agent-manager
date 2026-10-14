@@ -1,44 +1,50 @@
-# Agent 管家 · v0.8.3
+# 小年助手 · v0.8.3
 
 **每天开始 Agent 工作的个人工作台，用来管理今日工作、项目、Agent、Prompt/Skills/MCP 等资源，并保护重要 Agent 数据。**
 
-打开程序，先看今天做什么，进入正在进行的项目，再找到需要的 Agent 和资源。每日计划、项目记录与资源正文保存在真实 Markdown 文件中，可以由 Obsidian 编辑；备份与恢复集中在“数据安全”。今日首页先显示“今日要做”，再显示可设截止日期的 Todo；两块清单共用每日 Markdown，编辑计划后自动刷新。日程总览仍可查看完整跨日安排。
+打开程序，先看今天做什么，进入正在进行的项目，再找到需要的 Agent 和资源。每日计划、项目记录与资源正文保存在真实 Markdown 文件中，可以由 Obsidian 编辑；备份与恢复集中在“数据安全”。今日首页先显示“今日要做”，再显示可设截止日期的 Todo；两块清单共用每日 Markdown，编辑计划后自动刷新。独立“计划”入口集中查看跨日安排与中长期目标。
 
 项目页采用左侧项目卡片、右侧项目工作区：先看当前阶段和下一步，再看目标、进展、阶段总结、待办、风险与最近记录。任务统计来自已有清单，完整原文和 Obsidian 入口始终保留；目录、归档及索引维护集中在“更多操作”。
 
 v0.8.0 将编号项目的归档 / 重新启用改为切换 STATUS 生命周期，不移动目录、不改 Obsidian 链接；旧版本已经移动到 archive 的项目也按状态正确显示。项目当前状态卡片新增明显的编辑入口，保存后直接更新原 Markdown。
 
-## 六个入口
+## 模块入口
 
 | 入口 | 解决什么问题 |
 | --- | --- |
-| 工作台（默认首页） | 默认看今天；切换任意日期，手动刷新 Markdown；日程总览查看未来安排与所有未完成任务 |
-| 项目 | 当前阶段与下一步、STATUS / TASKS / HANDOFF、阶段总结、笔记、归档与重新启用 |
+| 工作台（默认首页） | 今日任务、日程与 Todo，项目动态、Agent 进程状态、提醒、最近使用和快捷入口；切换日期查看 Markdown |
+| 计划 | 日计划、未来安排、长期目标、周期任务、项目时间线、模板和复盘；继续复用 Markdown |
+| 项目 | 当前阶段与下一步、STATUS / TASKS / HANDOFF、阶段总结、笔记、只读 Git 状态、归档与重新启用 |
 | Agent | Hermes、Codex、Claude Code、WorkBuddy、CodeBuddy 和手动登记 Agent 的常用入口、记录、目录、关联资源 |
-| 资源库 | 统一收藏、搜索和整理 Prompt / Skill / MCP / 工具 / 网站 / GitHub / 文章 / 模板等资料 |
+| 资源库 | 统一收藏、搜索和整理 Prompt / Skill / MCP / API / 工具 / 网站 / GitHub / 文章 / 模板等资料 |
+| 电脑与环境 | 查看本机硬件占用、运行进程、已安装软件与 Python / Node / Git 等开发工具 |
+| 工具整合 | 收藏常用软件和网站，登记本地程序或网页启动目标并一键打开 |
+| 设置 | 配置 Markdown 与备份目录、备份保留数量、统一备份密码和浅色/深色主题 |
 | 数据安全 | 原生 Hermes 备份恢复、加密 .amb、完整性校验、恢复演练、备份历史、换电脑恢复与操作记录 |
 | 设置 | 文字资料位置、备份位置和必要选项 |
 
-资源库登记 MCP 的用途、安装与配置说明、安装 / 配置 / 测试状态；本版不连接 MCP，也不运行资源里的命令。阶段总结提供人工编辑和可复制 Prompt，不引入 AI 调度框架。
+资源库登记 MCP / API 的用途、接入说明和人工状态；不要在 Markdown 中保存令牌或密码。本版不连接 MCP / API，也不运行资源里的命令。阶段总结提供人工编辑和可复制 Prompt，不引入 AI 调度框架。
 
 ## 开始使用
 
 Windows 便携包完整解压后运行 `AgentManager/AgentManager.exe`。保留整个目录；不要只复制 exe。macOS / Linux 使用对应平台运行包，源码模式也可运行。
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\python -m pip install -e .
-.venv\Scripts\python -m agent_manager
+# 在 agent-manager 项目根目录执行
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+$env:PYTHONPATH = (Join-Path $PWD "src")
+.\.venv\Scripts\python.exe -m agent_manager
 ```
 
 macOS / Linux：激活虚拟环境后 `python -m pip install -e . && python -m agent_manager`。Python 需要 3.11+。各平台分别打包，不能拿 Windows exe 在其他系统运行。
 
-Windows 源码启动可双击 `start.cmd`；当项目旁已有 AgentManager-Portable 安装时沿用其 data，避免打开另一套空登记。需要隔离开发时显式设置 AGENT_MANAGER_DATA_DIR。
+Windows 源码启动可双击 `start.cmd`，会直接进入“工作台”；当项目旁已有 AgentManager-Portable 安装时沿用其 data，避免打开另一套空登记。需要隔离开发时显式设置 AGENT_MANAGER_DATA_DIR。命令行启动默认也进入“工作台”，可通过 `--startup-page plan` 进入“计划”。
 
 第一次打开：
 
 1. 在“项目”选择已有规范工作区（含 `agent/projects.json`），或初始化一个空文件夹。
-2. 在“工作台”使用 Todo 管理有截止日期的待办，或在“今日要做”添加当天任务；任务勾选后写回日期对应的 Markdown。外部修改 Markdown 后点“刷新”载入最新内容。顶部日期框 / 左右箭头切换日期，“回到今天”返回今天。“日程总览”集中查看未来 30 天、所有未完成任务、全部已登记事项或自选日期范围；双击进入对应日期。需要整体整理时点“编辑今日计划 / 编辑当日计划”。
+2. 在“工作台”切换“任务 / 日程 / Todo”查看当天安排，勾选任务后写回日期对应的 Markdown；顶部日期框 / 左右箭头切换日期，“回到今天”返回今天。外部修改 Markdown 后点“刷新”载入最新内容。进入“计划”可查看日历、周/月安排和目标；周期任务只在计划中投影，点击“加入每日计划”后才写入对应日期的 Markdown。模板可套用到选定日期。
 3. 进入项目查看阶段与下一步，必要时添加关联 Agent 和资源。
 4. 在“Agent”登记常用工具，在“资源库”收藏说明与 Prompt。
 5. 需要保护资料时进入“数据安全”，沿用已有备份登记、口令与恢复流程。

@@ -19,4 +19,4 @@ agent-manager = "agent_manager.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_manager = ["assets/fonts/*.otf", "assets/fonts/*.txt", "assets/fonts/*.md", "assets/docs/*.md"]
+agent_manager = ["assets/fonts/*.otf", "assets/fonts/*.txt", "assets/fonts/*.md", "assets/docs/*.md", "assets/ui/*.svg"]

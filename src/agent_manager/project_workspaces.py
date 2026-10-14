@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import stat
 import subprocess
@@ -14,11 +15,13 @@ from pathlib import Path
 from uuid import uuid4
 from urllib.parse import quote
 
-from .domain import UserError
+from .domain import Cancelled, UserError
 from .runtime import TaskContext
 
 STATES = {"candidate": "待开展", "active": "进行中", "paused": "暂停", "completed": "已完成", "archived": "已归档"}
-MANAGEMENT_FILES = ("README.md", "AGENTS.md", "agent/README.md", "agent/STATUS.md", "agent/TASKS.md", "agent/HANDOFF.md")
+MANAGEMENT_FILES = ("README.md", "AGENTS.md", "agent/README.md", "agent/STATUS.md", "agent/TASKS.md",
+                    "agent/TASKS-AI.md", "agent/TASKS-MANUAL.md", "agent/HANDOFF.md", "agent/MILESTONES.md")
+OPTIONAL_MANAGEMENT_FILES = {"agent/TASKS-AI.md", "agent/TASKS-MANUAL.md", "agent/MILESTONES.md"}
 
 
 def today() -> str:
@@ -33,7 +36,9 @@ def linked(path: Path) -> bool:
 
 
 def field(text: str, name: str) -> str:
-    front = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", text, re.S)
+    # Accept older STATUS files whose closing delimiter is immediately joined
+    # to the following Markdown heading (for example `---# ...`).
+    front = re.match(r"\A---\r?\n(.*?)\r?\n---(?=\r?\n|$|#)", text, re.S)
     values = re.findall(r"^" + re.escape(name) + r":[ \t]*(.*)$", front.group(1), re.M) if front else []
     if len(values) != 1:
         raise UserError(f"管理文档缺少或重复字段：{name}")
@@ -42,14 +47,19 @@ def field(text: str, name: str) -> str:
 
 def replace_state(text: str, state: str) -> str:
     field(text, "status")
-    front, body = text.split("---", 2)[1:]
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---(?=\r?\n|$|#)", text, re.S)
+    if not match:
+        raise UserError("STATUS 缺少有效 frontmatter。")
+    front, body = match.group(1), text[match.end():]
     front = re.sub(r"(?m)^status:.*$", "status: " + state, front)
     if re.search(r"(?m)^updated:", front):
         front = re.sub(r"(?m)^updated:.*$", "updated: " + today(), front)
     else:
-        front += "updated: " + today() + "\n"
+        front = front.rstrip("\r\n") + "\nupdated: " + today()
     body = re.sub(r"(?m)^- 生命周期：.*$", "- 生命周期：" + state, body)
-    return "---" + front + "---" + body
+    if body and not body.startswith(("\n", "\r")):
+        body = "\n" + body
+    return "---\n" + front.rstrip("\r\n") + "\n---" + body
 
 
 def lifecycle_state(text: str) -> str:
@@ -58,7 +68,7 @@ def lifecycle_state(text: str) -> str:
 
 
 def replace_frontmatter_value(text: str, name: str, value: str | None) -> str:
-    match = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", text, re.S)
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---(?=\r?\n|$|#)", text, re.S)
     if not match:
         raise UserError("STATUS 缺少有效 frontmatter。")
     front = match.group(1)
@@ -66,7 +76,10 @@ def replace_frontmatter_value(text: str, name: str, value: str | None) -> str:
     front = re.sub(pattern, "", front)
     if value is not None:
         front = front.rstrip("\r\n") + f"\n{name}: {value}\n"
-    return "---\n" + front.rstrip("\r\n") + "\n---" + text[match.end():]
+    body = text[match.end():]
+    if body and not body.startswith(("\n", "\r")):
+        body = "\n" + body
+    return "---\n" + front.rstrip("\r\n") + "\n---" + body
 
 
 class ProjectWorkspace:
@@ -113,13 +126,21 @@ class ProjectWorkspace:
             raise UserError("已发编号清单有重复或无效编号。")
         for item in data["projects"]:
             identity, name, relative = item.get("id", ""), item.get("name", ""), item.get("path", "")
-            if not name or any(c in name for c in "\r\n|") or not re.fullmatch(r"(?:projects|archive)/[^/\\]+", relative):
+            if not name or any(c in name for c in "\r\n|") or not re.fullmatch(r"projects/[^/\\]+", relative):
                 raise UserError("项目名称或登记路径无效。")
+            description = item.get("description", "")
+            if not isinstance(description, str) or len(description) > 4000:
+                raise UserError("项目介绍无效或超过 4000 个字符。")
             if item.get("legacy") is True:
-                if identity != "L-" + name or not relative.startswith("archive/"):
-                    raise UserError("旧归档登记不一致。")
-            elif item.get("legacy") is not False or identity not in issued or Path(relative).name != identity + "-" + name:
-                raise UserError("项目编号、名称与目录不一致。")
+                if identity != "L-" + name:
+                    raise UserError("旧项目登记不一致。")
+            else:
+                folder_name = item.get("folder_name")
+                if folder_name is not None and not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", folder_name):
+                    raise UserError("项目英文目录名不符合命名规范。")
+                expected_folder = identity + "-" + (folder_name or name)
+                if item.get("legacy") is not False or identity not in issued or Path(relative).name != expected_folder:
+                    raise UserError("项目编号、名称与目录不一致。")
             entry = item.get("vault_entry")
             if item.get("link_policy") not in {"junction", "symlink", "external", "plain-text"}:
                 raise UserError("项目入口策略无效。")
@@ -177,7 +198,7 @@ class ProjectWorkspace:
             raise UserError("初始化工作区需要一个新目录或空目录，不会重建已有工作区。")
         self.root.mkdir(parents=True, exist_ok=True)
         with self.lock("Initialize"):
-            for area in ("projects", "archive", "myself/03-项目"):
+            for area in ("projects", "myself/03-项目"):
                 self.path(area).mkdir(parents=True, exist_ok=True)
             self.write(self.registry_path, json.dumps({"schema_version": 2, "updated": today(), "projects": [], "issued_ids": []}, indent=2) + "\n")
             self.write(self.path("AGENTS.md"), "# 工作区规则\n\n编号不复用；身份与路径以 agent/projects.json 为准。\n进度以项目 STATUS 为准，任务只维护 TASKS 指定的真源，日志追加到 HANDOFF。\n项目之间默认隔离，不读凭据；创建与移动先检查冲突。\n同步副本不能同时分配编号；同一时刻由一台电脑管理本工作区。\n")
@@ -201,19 +222,76 @@ class ProjectWorkspace:
             rows.append({**project, "directory": str(path), "state": state, "error": error})
         return {"projects": rows, "workspace": str(self.root)}
 
+    def sync_archived_vault_entries(self, context: TaskContext) -> dict:
+        """Hide validated links for archived projects and repair their index rows.
+
+        The caller holds the workspace resource lock. Each project's index/link
+        changes are rolled back together if that project's update fails.
+        """
+        hidden = 0
+        errors = []
+        for item in self.registry()["projects"]:
+            context.checkpoint()
+            if not item.get("vault_entry") or item.get("link_policy") not in {"junction", "symlink"}:
+                continue
+            identity = item["id"]
+            project_path = self.path(item["path"])
+            try:
+                status_path = self.path(item["path"] + "/agent/STATUS.md")
+                status = self.read(status_path)
+                if lifecycle_state(status) != "archived" or field(status, "project_id") != identity:
+                    continue
+
+                entry_before = self._vault_entry_link_state(item, project_path)
+                index_outputs = self.lifecycle_index_outputs(identity, "archived")
+                context.checkpoint()
+                written_indexes: list[tuple[Path, str, str]] = []
+                try:
+                    for index_path, updated, original in index_outputs:
+                        if updated != original:
+                            self.write(index_path, updated, original)
+                            written_indexes.append((index_path, updated, original))
+                    self._set_vault_entry_link(item, project_path, False)
+                except Exception as exc:
+                    rollback_errors = []
+                    try:
+                        self._set_vault_entry_link(item, project_path, entry_before)
+                    except (OSError, UserError) as rollback_exc:
+                        rollback_errors.append("Obsidian 入口回退失败：" + str(rollback_exc))
+                    for index_path, updated, original in reversed(written_indexes):
+                        try:
+                            self.write(index_path, original, updated)
+                        except (OSError, UserError) as rollback_exc:
+                            rollback_errors.append("索引回退失败：" + str(rollback_exc))
+                    if rollback_errors:
+                        raise UserError("归档入口同步失败，自动回退需要检查：\n" + "\n".join(rollback_errors)) from exc
+                    raise
+                hidden += int(entry_before)
+            except Cancelled:
+                raise
+            except (OSError, UserError) as exc:
+                errors.append({"project_id": identity, "message": str(exc)})
+        return {"hidden_count": hidden, "errors": errors}
+
     def set_archived(self, identity: str, archived: bool, context: TaskContext) -> dict:
-        """Archive by changing STATUS only; project and Obsidian paths remain stable."""
+        """Archive a project and hide only its validated Obsidian directory link."""
         with self.lock("ArchiveStatus" if archived else "ResumeStatus"):
             item = self.project(identity)
-            if item.get("legacy"):
-                raise UserError("旧归档资料请使用‘从旧归档继续’创建新项目。")
+            project_path = self.path(item["path"])
             status_path = self.path(item["path"] + "/agent/STATUS.md")
-            before = self.read(status_path)
+            try:
+                before = self.read(status_path)
+            except FileNotFoundError as exc:
+                raise UserError(
+                    "项目状态文件不存在，未执行归档或重新启用。请恢复项目工作区或修正登记路径：\n" + str(status_path)
+                ) from exc
+            except PermissionError as exc:
+                raise UserError(
+                    "没有权限读取项目状态文件，未执行归档或重新启用：\n" + str(status_path)
+                ) from exc
             state = lifecycle_state(before)
             if field(before, "project_id") != identity or state not in STATES:
                 raise UserError("项目状态或编号需要检查，未执行归档操作。")
-            registry = self.registry()
-            self.index_outputs(registry)  # Refuse the lifecycle change if managed index blocks are invalid.
             if archived:
                 if state == "archived":
                     raise UserError("项目已经归档。")
@@ -223,19 +301,192 @@ class ProjectWorkspace:
                 if state != "archived":
                     raise UserError("项目当前不是已归档状态。")
                 prior = "active"
-                try:
-                    recorded = field(before, "archived_from")
-                    if recorded in set(STATES) - {"archived"}:
-                        prior = recorded
-                except UserError:
-                    pass  # Older archives did not store their previous lifecycle state.
                 after = replace_frontmatter_value(before, "archived_from", None)
                 after = replace_state(after, prior)
+            entry_before = self._vault_entry_link_state(item, project_path)
+            index_outputs = self.lifecycle_index_outputs(identity, "archived" if archived else prior)
             context.checkpoint()
-            self.write(status_path, after, before)
-            self.update_indexes(registry)
+            status_written = False
+            written_indexes: list[tuple[Path, str, str]] = []
+            try:
+                self.write(status_path, after, before)
+                status_written = True
+                for index_path, updated, original in index_outputs:
+                    self.write(index_path, updated, original)
+                    written_indexes.append((index_path, updated, original))
+                self._set_vault_entry_link(item, project_path, not archived)
+            except Exception as exc:
+                rollback_errors = []
+                try:
+                    self._set_vault_entry_link(item, project_path, entry_before)
+                except (OSError, UserError) as rollback_exc:
+                    rollback_errors.append("Obsidian 入口回退失败：" + str(rollback_exc))
+                for index_path, updated, original in reversed(written_indexes):
+                    try:
+                        self.write(index_path, original, updated)
+                    except (OSError, UserError) as rollback_exc:
+                        rollback_errors.append("索引回退失败：" + str(rollback_exc))
+                if status_written:
+                    try:
+                        self.write(status_path, before, after)
+                    except (OSError, UserError) as rollback_exc:
+                        rollback_errors.append("项目状态回退失败：" + str(rollback_exc))
+                if rollback_errors:
+                    raise UserError("状态切换失败，自动回退需要检查：\n" + "\n".join(rollback_errors)) from exc
+                if isinstance(exc, UserError):
+                    raise
+                raise UserError("状态切换失败，项目状态与索引已尝试恢复：" + str(exc)) from exc
         return {"project_id": identity, "state": "archived" if archived else prior,
-                "path": str(self.path(item["path"])), "moved": False}
+                "path": str(project_path), "moved": False,
+                "vault_entry_hidden": bool(archived and item.get("vault_entry"))}
+
+    def delete_project(self, identity: str, confirmation: str, context: TaskContext) -> dict:
+        """Permanently delete one archived project after its exact name is confirmed."""
+        with self.lock("DeleteProject"):
+            observed = self.read(self.registry_path)
+            data = self.registry()
+            if self.read(self.registry_path) != observed:
+                raise UserError("项目登记在读取时发生变化，请刷新后重试。")
+            item = next((project for project in data["projects"] if project["id"] == identity), None)
+            if item is None:
+                raise UserError("项目登记已变化，请刷新列表。")
+            if confirmation != item["name"]:
+                raise UserError("输入的项目名称不匹配，未删除项目。")
+
+            directory = self.path(item["path"])
+            status_path = self.path(item["path"] + "/agent/STATUS.md")
+            try:
+                status = self.read(status_path)
+            except FileNotFoundError as exc:
+                raise UserError("项目状态文件不存在，未删除项目：\n" + str(status_path)) from exc
+            except PermissionError as exc:
+                raise UserError("没有权限读取项目状态文件，未删除项目：\n" + str(status_path)) from exc
+            if field(status, "project_id") != identity or lifecycle_state(status) not in STATES:
+                raise UserError("项目状态或编号需要检查，未删除项目。")
+            if lifecycle_state(status) != "archived":
+                raise UserError("请先归档项目，再执行删除。")
+            if not directory.is_dir():
+                raise UserError("项目目录不存在，未删除登记：\n" + str(directory))
+            if linked(directory):
+                raise UserError("项目目录本身是联接或符号链接；为避免触及外部资料，已停止删除。")
+
+            entry_path = None
+            if item.get("vault_entry"):
+                entry_path = self.path(item["vault_entry"], allow_link=True)
+                if linked(entry_path):
+                    self._vault_entry_link_state(item, directory)
+                elif entry_path.exists():
+                    raise UserError("登记的 Obsidian 入口不是目录联接，未删除项目：\n" + str(entry_path))
+                else:
+                    # Archived projects intentionally have no Vault link.
+                    entry_path = None
+
+            walk_errors: list[OSError] = []
+            for current, subdirs, files in os.walk(directory, topdown=True, followlinks=False,
+                                                   onerror=walk_errors.append):
+                context.checkpoint()
+                for name in subdirs + files:
+                    nested = Path(current) / name
+                    if linked(nested):
+                        raise UserError("项目目录内含联接或符号链接，为避免删除外部资料已停止：\n" + str(nested))
+            if walk_errors:
+                raise UserError("无法完整检查项目目录，为避免部分删除已停止：\n" + str(walk_errors[0].filename))
+
+            remaining_data = {
+                **data,
+                "projects": [project for project in data["projects"] if project["id"] != identity],
+            }
+            # Deletion only needs to remove this project's generated index rows.
+            # Rebuilding the full indexes would make an unrelated malformed
+            # STATUS.md block deletion for every otherwise valid archived project.
+            index_outputs = self.delete_index_outputs(remaining_data, identity)
+            context.checkpoint()
+            token = uuid4().hex
+            staged_directory = self.path("projects/.delete-" + token)
+            if staged_directory.exists():
+                raise UserError("删除暂存路径发生冲突，请稍后重试。")
+            staged_entry = None
+            if entry_path is not None:
+                staged_entry = self.path(item["vault_entry"] + ".delete-" + token)
+                if staged_entry.exists() or linked(staged_entry):
+                    raise UserError("Obsidian 入口暂存路径发生冲突，请稍后重试。")
+
+            moved_directory = False
+            moved_entry = False
+            registry_saved = False
+            written_indexes: list[tuple[Path, str, str]] = []
+            try:
+                os.replace(directory, staged_directory)
+                moved_directory = True
+                if entry_path is not None and staged_entry is not None:
+                    os.replace(entry_path, staged_entry)
+                    moved_entry = True
+
+                data = remaining_data
+                self.save_registry(data, observed)
+                registry_saved = True
+                for index_path, after, before in index_outputs:
+                    self.write(index_path, after, before)
+                    written_indexes.append((index_path, after, before))
+            except Exception as exc:
+                rollback_errors = []
+                if registry_saved:
+                    try:
+                        current_registry = self.read(self.registry_path)
+                        self.write(self.registry_path, observed, current_registry)
+                    except (OSError, UserError) as rollback_exc:
+                        rollback_errors.append("登记表回退失败：" + str(rollback_exc))
+                if moved_entry and staged_entry is not None and entry_path is not None:
+                    try:
+                        os.replace(staged_entry, entry_path)
+                    except OSError as rollback_exc:
+                        rollback_errors.append("Obsidian 入口回退失败：" + str(rollback_exc))
+                if moved_directory:
+                    try:
+                        os.replace(staged_directory, directory)
+                    except OSError as rollback_exc:
+                        rollback_errors.append("项目目录回退失败：" + str(rollback_exc))
+                for index_path, after, before in reversed(written_indexes):
+                    try:
+                        self.write(index_path, before, after)
+                    except (OSError, UserError) as rollback_exc:
+                        rollback_errors.append("索引回退失败：" + str(rollback_exc))
+                if rollback_errors:
+                    raise UserError("删除未完成，且自动回退需要检查：\n" + "\n".join(rollback_errors)
+                                    + "\n暂存目录：" + str(staged_directory)) from exc
+                if isinstance(exc, UserError):
+                    raise
+                raise UserError("删除未完成，项目目录、登记和索引已尝试恢复：" + str(exc)) from exc
+
+            try:
+                shutil.rmtree(staged_directory)
+            except OSError as exc:
+                raise UserError("项目已从登记和索引移除，但完整资料未能全部删除；请手动检查暂存目录：\n"
+                                + str(staged_directory)) from exc
+            if staged_entry is not None:
+                try:
+                    os.rmdir(staged_entry)
+                except OSError as exc:
+                    raise UserError("项目目录已删除并从登记移除，但 Obsidian 入口未能清理；请手动检查：\n"
+                                    + str(staged_entry)) from exc
+
+        context.log("已删除已归档项目目录和登记入口；永久保留已发项目编号。")
+        return {"project_id": identity, "name": item["name"], "deleted": True,
+                "issued_id_retained": True, "directory": str(directory),
+                "vault_entry": str(entry_path) if entry_path is not None else ""}
+
+    def record_project_use(self, identity: str) -> str:
+        """Persist the most recent project selection in the workspace registry."""
+        with self.lock("RecordProjectUse"):
+            observed = self.read(self.registry_path)
+            data = self.registry()
+            item = next((project for project in data["projects"] if project["id"] == identity), None)
+            if item is None:
+                return ""
+            used_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            item["last_used_at"] = used_at
+            self.save_registry(data, observed)
+            return used_at
 
     def document(self, identity: str, relative: str) -> dict:
         if relative not in MANAGEMENT_FILES:
@@ -243,6 +494,160 @@ class ProjectWorkspace:
         item = self.project(identity)
         text = self.read(self.path(item["path"] + "/" + relative))
         return {"text": text, "path": str(self.path(item["path"] + "/" + relative))}
+
+    def project_documents(self, identity: str, context: TaskContext) -> dict:
+        """List user-owned project material from the project's 文档 directory."""
+        item = self.project(identity)
+        folder = self.path(item["path"] + "/文档")
+        rows = []
+        if folder.exists():
+            for path in sorted(folder.iterdir(), key=lambda entry: entry.name.casefold()):
+                context.checkpoint()
+                self.path(path.relative_to(self.root).as_posix())
+                if path.is_file():
+                    info = path.stat()
+                    rows.append({"name": path.name, "relative": "文档/" + path.name,
+                                 "size": info.st_size, "modified": datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M")})
+        return {"documents": rows, "directory": str(folder)}
+
+    def project_document(self, identity: str, relative: str) -> dict:
+        if not relative.startswith("文档/") or len(Path(relative).parts) != 2:
+            raise UserError("请选择项目文档目录中的文件。")
+        item = self.project(identity)
+        path = self.path(item["path"] + "/" + relative)
+        if not path.is_file():
+            raise UserError("项目文档不存在或不是普通文件。")
+        info = path.stat()
+        text_extensions = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".xml", ".html", ".css", ".js", ".py"}
+        if path.suffix.lower() not in text_extensions:
+            return {"text": "此文件类型不支持内置预览。可使用“打开文件”查看，或在 Obsidian 中编辑 Markdown 文件。",
+                    "path": str(path), "previewable": False, "size": info.st_size}
+        if info.st_size > 2_000_000:
+            return {"text": "文件超过 2 MB，已跳过内置预览。可使用“打开文件”查看。", "path": str(path),
+                    "previewable": False, "size": info.st_size}
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except UnicodeError:
+            return {"text": "文件不是 UTF-8 文本，已跳过内置预览。可使用“打开文件”查看。", "path": str(path),
+                    "previewable": False, "size": info.st_size}
+        return {"text": text, "path": str(path), "previewable": True, "markdown": path.suffix.lower() == ".md", "size": info.st_size}
+
+    def ensure_project_documents_directory(self, identity: str, context: TaskContext) -> dict:
+        with self.lock("OpenProjectDocuments"):
+            item = self.project(identity)
+            if lifecycle_state(self.read(self.path(item["path"] + "/agent/STATUS.md"))) == "archived":
+                raise UserError("已归档项目为只读，请先重新启用。")
+            folder = self.path(item["path"] + "/文档")
+            context.checkpoint()
+            folder.mkdir(exist_ok=True)
+        return {"project_id": identity, "path": str(folder)}
+
+    def upload_project_document(self, identity: str, source: str | Path, context: TaskContext) -> dict:
+        source_path = Path(source).expanduser()
+        if linked(source_path):
+            raise UserError("请选择普通文件，不能上传目录联接或符号链接。")
+        try:
+            source_path = source_path.resolve(strict=True)
+        except OSError as exc:
+            raise UserError("所选文件已不存在或无法读取。") from exc
+        if not source_path.is_file():
+            raise UserError("请选择一个文件。")
+        if source_path.stat().st_size > 500 * 1024 * 1024:
+            raise UserError("单个项目文档不能超过 500 MB。")
+        with self.lock("UploadProjectDocument"):
+            item = self.project(identity)
+            if lifecycle_state(self.read(self.path(item["path"] + "/agent/STATUS.md"))) == "archived":
+                raise UserError("已归档项目为只读，请先重新启用。")
+            folder = self.path(item["path"] + "/文档")
+            folder.mkdir(exist_ok=True)
+            target = self.path(item["path"] + "/文档/" + source_path.name)
+            if target.resolve() == source_path:
+                raise UserError("所选文件已经位于当前项目文档目录中。")
+            created = False
+            try:
+                with source_path.open("rb") as incoming, target.open("xb") as copied:
+                    created = True
+                    while chunk := incoming.read(1024 * 1024):
+                        context.checkpoint()
+                        copied.write(chunk)
+                shutil.copystat(source_path, target)
+            except FileExistsError as exc:
+                raise UserError("项目文档区已存在同名文件，没有覆盖原文件；请先为新文件改名。") from exc
+            except Exception:
+                if created:
+                    target.unlink(missing_ok=True)
+                raise
+        context.log("已将项目资料副本保存到文档目录；原文件未移动或修改。")
+        return {"project_id": identity, "name": target.name, "relative": "文档/" + target.name,
+                "path": str(target), "directory": str(folder)}
+
+    def milestones_document(self, identity: str) -> dict:
+        """Read the user-maintained milestone document when it exists."""
+        item = self.project(identity)
+        path = self.path(item["path"] + "/agent/MILESTONES.md")
+        if not path.exists():
+            return {"text": "", "path": str(path), "exists": False}
+        return {"text": self.read(path), "path": str(path), "exists": True}
+
+    def set_milestone_status(self, identity: str, expected_text: str, line_number: int,
+                             status_column: int, expected_status: str, completed: bool,
+                             context: TaskContext) -> dict:
+        """Toggle one milestone status without replacing concurrent Obsidian edits."""
+        if not isinstance(line_number, int) or line_number < 1 or not isinstance(status_column, int) or status_column < 0:
+            raise UserError("里程碑行位置无效，请刷新后重试。")
+        if not isinstance(expected_text, str) or not isinstance(expected_status, str):
+            raise UserError("里程碑内容无效，请刷新后重试。")
+        new_status = "已完成" if completed else "待开始"
+        context.checkpoint()
+        with self.lock("SetMilestoneStatus"):
+            item = self.project(identity)
+            status_path = self.path(item["path"] + "/agent/STATUS.md")
+            project_state = field(self.read(status_path), "status")
+            if project_state == "archived":
+                raise UserError("已归档项目为只读，请先重新启用。")
+            if project_state not in STATES:
+                raise UserError("项目状态需要检查，未更新里程碑；请先刷新项目状态。")
+            path = self.path(item["path"] + "/agent/MILESTONES.md")
+            if self.read(path) != expected_text:
+                raise UserError("里程碑文档已被其他程序修改，请刷新后重试；文档未覆盖。")
+            raw = path.read_bytes()
+            has_bom = raw.startswith(b"\xef\xbb\xbf")
+            source = raw.decode("utf-8-sig")
+            normalized = source.replace("\r\n", "\n").replace("\r", "\n")
+            if normalized != expected_text:
+                raise UserError("里程碑文档在读取期间发生变化，请刷新后重试；文档未覆盖。")
+            lines = source.splitlines(keepends=True)
+            if line_number > len(lines):
+                raise UserError("里程碑行已变化，请刷新后重试。")
+            parts = lines[line_number - 1].split("|")
+            cells = parts[1:-1] if len(parts) >= 3 else []
+            if status_column >= len(cells):
+                raise UserError("此里程碑没有可编辑的状态列。")
+            current = cells[status_column].strip()
+            if current != expected_status:
+                raise UserError("里程碑状态已变化，请刷新后重试。")
+            cell = cells[status_column]
+            left = len(cell) - len(cell.lstrip())
+            right = len(cell) - len(cell.rstrip())
+            cells[status_column] = cell[:left] + new_status + (cell[len(cell) - right:] if right else "")
+            parts[status_column + 1] = cells[status_column]
+            lines[line_number - 1] = "|".join(parts)
+            updated = ("\ufeff" if has_bom else "") + "".join(lines)
+            self.write(path, updated, expected_text)
+        context.log("已更新里程碑完成状态；仅修改对应表格单元格。")
+        return {"project_id": identity, "line_number": line_number, "status": new_status}
+
+    def create_milestones_document(self, identity: str, context: TaskContext) -> dict:
+        """Create an empty milestone source without inventing milestone records."""
+        with self.lock("CreateMilestonesDocument"):
+            item = self.project(identity)
+            if field(self.read(self.path(item["path"] + "/agent/STATUS.md")), "status") == "archived":
+                raise UserError("已归档项目为只读，请先重新启用。")
+            path = self.path(item["path"] + "/agent/MILESTONES.md")
+            context.checkpoint()
+            if not path.exists():
+                self.write(path, default_template("MILESTONES.md").replace("{{NAME}}", item["name"]).replace("{{ID}}", identity).replace("{{DATE}}", today()))
+        return {"project_id": identity, "path": str(path)}
 
     def notes(self, identity: str, context: TaskContext) -> dict:
         item = self.project(identity)
@@ -256,6 +661,15 @@ class ProjectWorkspace:
                     if path.is_file():
                         rows.append({"name": path.stem, "relative": "笔记/" + path.name})
         return {"notes": rows}
+
+    def ensure_notes_directory(self, identity: str, context: TaskContext) -> dict:
+        """Create the standard project note folder when needed and return its path."""
+        with self.lock("OpenProjectNotesDirectory"):
+            item = self.project(identity)
+            folder = self.path(item["path"] + "/笔记")
+            context.checkpoint()
+            folder.mkdir(exist_ok=True)
+        return {"project_id": identity, "path": str(folder)}
 
     def note_document(self, identity: str, relative: str) -> dict:
         if not relative.startswith("笔记/") or len(Path(relative).parts) != 2 or not relative.lower().endswith(".md"):
@@ -301,6 +715,76 @@ class ProjectWorkspace:
             raise UserError("项目登记已变化，请刷新列表。")
         return item
 
+    def set_description(self, identity: str, description: str, context: TaskContext) -> dict:
+        """Save the user's project introduction in projects.json, separate from STATUS."""
+        if not isinstance(description, str) or len(description) > 4000:
+            raise UserError("项目介绍不能超过 4000 个字符。")
+        context.checkpoint()
+        with self.lock("EditProjectDescription"):
+            observed = self.read(self.registry_path)
+            data = self.registry()
+            item = next((project for project in data["projects"] if project["id"] == identity), None)
+            if item is None:
+                raise UserError("项目登记已变化，请刷新列表。")
+            item["description"] = description.strip()
+            self.save_registry(data, observed)
+        context.log("已更新项目介绍；项目状态文档未修改。")
+        return {"project_id": identity, "description": item["description"]}
+
+    def set_project_info(self, identity: str, info: dict, context: TaskContext, description: str | None = None) -> dict:
+        """Save overview fields and, when supplied, the introduction in one registry update."""
+        if not isinstance(info, dict):
+            raise UserError("项目信息格式无效。")
+        if description is not None and (not isinstance(description, str) or len(description) > 4000):
+            raise UserError("项目介绍不能超过 4000 个字符。")
+        allowed = {"owner", "members", "start_date", "end_date", "priority", "repository", "tags", "cover_image"}
+        if set(info) - allowed:
+            raise UserError("项目信息包含不支持的字段。")
+        context.checkpoint()
+        with self.lock("EditProjectInfo"):
+            observed = self.read(self.registry_path)
+            data = self.registry()
+            item = next((project for project in data["projects"] if project["id"] == identity), None)
+            if item is None:
+                raise UserError("项目登记已变化，请刷新列表。")
+            if field(self.read(self.path(item["path"] + "/agent/STATUS.md")), "status") == "archived":
+                raise UserError("已归档项目为只读，请先重新启用。")
+            members = info.get("members", [])
+            if not isinstance(members, list) or len(members) > 20 or any(not isinstance(name, str) or len(name) > 100 for name in members):
+                raise UserError("项目成员信息无效。")
+            previous_info = item.get("project_info", {})
+            if not isinstance(previous_info, dict):
+                raise UserError("已有项目信息格式无效，请先检查登记表。")
+            tags = info.get("tags", previous_info.get("tags", []))
+            if not isinstance(tags, list) or len(tags) > 12 or any(not isinstance(tag, str) or not tag.strip() or len(tag) > 100 for tag in tags):
+                raise UserError("项目标签信息无效。")
+            for key in ("owner", "start_date", "end_date", "priority", "repository", "cover_image"):
+                if not isinstance(info.get(key, ""), str) or len(info.get(key, "")) > 500:
+                    raise UserError("项目信息字段无效或过长。")
+            cover_image = info.get("cover_image", previous_info.get("cover_image", ""))
+            if cover_image and (Path(cover_image).suffix.casefold() not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}):
+                raise UserError("项目封面请使用 PNG、JPG、WEBP 或 BMP 图片。")
+            if info.get("priority", "") not in {"", "high", "medium", "low"}:
+                raise UserError("项目优先级无效。")
+            parsed_dates = []
+            for key in ("start_date", "end_date"):
+                value = info.get(key, "")
+                if value:
+                    try:
+                        parsed_dates.append(datetime.strptime(value, "%Y-%m-%d").date())
+                    except ValueError as exc:
+                        raise UserError("项目日期请使用 YYYY-MM-DD 格式。") from exc
+                else:
+                    parsed_dates.append(None)
+            if parsed_dates[0] and parsed_dates[1] and parsed_dates[0] > parsed_dates[1]:
+                raise UserError("项目开始日期不能晚于结束日期。")
+            item["project_info"] = {**previous_info, **info}
+            if description is not None:
+                item["description"] = description.strip()
+            self.save_registry(data, observed)
+        context.log("已更新项目介绍和概览信息；项目 Markdown 文档未修改。")
+        return {"project_id": identity, "project_info": item["project_info"], "description": item.get("description", "")}
+
     def _link(self, entry: str, target: Path):
         path = self.path(entry)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,34 +799,75 @@ class ProjectWorkspace:
         else:
             path.symlink_to(target, target_is_directory=True)
 
-    def create(self, name: str, goal: str, use_entry: bool, context: TaskContext) -> dict:
+    def _vault_entry_link_state(self, item: dict, project_directory: Path) -> bool:
+        """Validate the registered Vault entry and report whether its link exists."""
+        relative = item.get("vault_entry")
+        if not relative:
+            return False
+        path = self.path(relative, allow_link=True)
+        if not linked(path):
+            if path.exists():
+                raise UserError("登记的 Obsidian 入口不是目录联接；为保护现有内容已停止：\n" + str(path))
+            return False
+        if not path.is_dir():
+            raise UserError("登记的 Obsidian 入口不是有效目录联接：\n" + str(path))
+        try:
+            actual = path.resolve(strict=True)
+            expected = project_directory.resolve(strict=True)
+        except OSError as exc:
+            raise UserError("无法核对 Obsidian 入口指向：\n" + str(path)) from exc
+        if actual != expected:
+            raise UserError("Obsidian 入口未指向当前项目目录；为保护其他资料已停止：\n" + str(path))
+        return True
+
+    def _set_vault_entry_link(self, item: dict, project_directory: Path, present: bool) -> None:
+        """Create or remove only the registered junction/symlink, never its target."""
+        relative = item.get("vault_entry")
+        if not relative:
+            return
+        path = self.path(relative, allow_link=True)
+        exists = self._vault_entry_link_state(item, project_directory)
+        if present and not exists:
+            self._link(relative, project_directory)
+        elif not present and exists:
+            if os.name == "nt":
+                path.rmdir()  # Removes the junction entry without touching its target.
+            else:
+                path.unlink()
+
+    def create(self, name: str, goal: str, use_entry: bool, context: TaskContext, folder_name: str | None = None) -> dict:
         if not name.strip() or len(name) > 80 or re.search(r'[<>:"/\\|?*\x00-\x1f]', name) or name.endswith((".", " ")) or name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *("COM" + str(i) for i in range(1,10)), *("LPT" + str(i) for i in range(1,10))}:
             raise UserError("请使用有效项目名称，不包含路径或文件名保留字符。")
+        standardized_folder_name = folder_name is not None
+        if standardized_folder_name:
+            folder_name = re.sub(r"[^a-z0-9]+", "-", folder_name.strip().lower()).strip("-")
+            if not folder_name or len(folder_name) > 60:
+                raise UserError("请填写 1–60 个字符的英文目录名，只使用英文字母和数字。")
         if not goal.strip() or len(goal) > 2000:
             raise UserError("请填写项目目标（不超过 2000 个字符）。")
         with self.lock("New"):
             observed = self.read(self.registry_path)
             data = self.registry()
             self.index_outputs(data)  # Validate managed sections before any creation.
-            if any(p["name"].casefold() == name.casefold() for p in data["projects"]):
-                raise UserError("已有同名项目，请继续使用已有项目。")
+            if any(p["name"].casefold() == name.casefold() or (standardized_folder_name and p.get("folder_name", p["name"]).casefold() == folder_name.casefold()) for p in data["projects"]):
+                raise UserError("已有同名项目或英文目录名，请修改后再创建。")
             known = {p["path"] for p in data["projects"]}
-            for area in ("projects", "archive"):
+            for area in ("projects",):
                 for child in self.path(area).iterdir():
                     if child.is_dir() and child.relative_to(self.root).as_posix() not in known:
                         raise UserError("发现未登记项目目录，请先核对登记表，不自动重复初始化。")
             year = today()[:4]
             identifiers = list(data["issued_ids"])
-            for area in ("projects", "archive", "myself/03-项目"):
+            for area in ("projects", "myself/03-项目"):
                 identifiers.extend(p.name for p in self.path(area).iterdir())
             numbers = [int(m.group(1)) for value in identifiers if (m := re.match("P-" + year + r"-(\d{3})(?:-|$)", value))]
             number = max(numbers, default=0) + 1
             if number > 999:
                 raise UserError("本年度项目编号已满。")
             identity = f"P-{year}-{number:03d}"
-            folder = identity + "-" + name
+            folder = identity + "-" + (folder_name if standardized_folder_name else name)
             relative, entry = "projects/" + folder, "myself/03-项目/" + folder if use_entry else None
-            for candidate in (relative, "archive/" + folder, "myself/03-项目/" + folder):
+            for candidate in (relative, "myself/03-项目/" + folder):
                 if self.path(candidate).exists():
                     raise UserError("项目或入口目标已存在。")
             data["issued_ids"].append(identity)
@@ -350,22 +875,25 @@ class ProjectWorkspace:
             observed = self.read(self.registry_path)
             target = self.path(relative)
             target.mkdir()
-            for filename in ("README.md", "STATUS.md", "TASKS.md", "HANDOFF.md", "AGENTS.md"):
+            for filename in ("README.md", "STATUS.md", "TASKS.md", "HANDOFF.md", "MILESTONES.md", "AGENTS.md"):
                 existing = self.path("agent/templates/" + filename)
                 text = self.read(existing) if existing.is_file() else default_template(filename)
-                for key, value in {"NAME": name, "DATE": today(), "ID": identity, "STATE": "candidate", "GOAL": goal, "PATH": str(target), "VAULT": str(self.root / entry) if entry else "无（只保留索引）", "WORKSPACE": str(self.root)}.items():
+                for key, value in {"NAME": name, "DATE": today(), "ID": identity, "STATE": "active", "GOAL": goal, "PATH": str(target), "VAULT": str(self.root / entry) if entry else "无（只保留索引）", "WORKSPACE": str(self.root)}.items():
                     text = text.replace("{{" + key + "}}", value)
-                if not entry and filename in {"AGENTS.md", "HANDOFF.md"}:
+                if not entry and filename in {"AGENTS.md", "HANDOFF.md", "MILESTONES.md"}:
                     text += "\n本次入口策略：仅索引；未建立 Obsidian 联接。\n"
                 self.write(target / (filename if filename == "AGENTS.md" else "agent/" + filename), text)
             self.write(target / "README.md", f"# {name}\n\n编号：{identity}\n\n[接续入口](agent/README.md) · [状态](agent/STATUS.md) · [任务](agent/TASKS.md) · [日志与交接](agent/HANDOFF.md)\n")
             if entry:
                 self._link(entry, target)
-            data["projects"].append({"id": identity, "name": name, "path": relative, "vault_entry": entry, "legacy": False, "link_policy": ("junction" if os.name == "nt" else "symlink") if entry else "plain-text"})
+            item = {"id": identity, "name": name, "path": relative, "vault_entry": entry, "legacy": False, "link_policy": ("junction" if os.name == "nt" else "symlink") if entry else "plain-text"}
+            if standardized_folder_name:
+                item["folder_name"] = folder_name
+            data["projects"].append(item)
             self.save_registry(data, observed)
             self.update_indexes(data)
         context.log("已创建必要管理文件并更新索引；业务任务和备份尚未验证。")
-        return {"project_id": identity, "directory": str(target), "state": "candidate"}
+        return {"project_id": identity, "directory": str(target), "state": "active"}
 
     def index_outputs(self, data: dict) -> list[tuple[Path, str, str | None]]:
         rows = {"projects": [], "archive": []}
@@ -375,8 +903,10 @@ class ProjectWorkspace:
             if state not in STATES or field(status, "project_id") != item["id"]:
                 raise UserError("项目状态字段不合规，停止更新索引。")
             entry = "[[" + item["vault_entry"][len("myself/"):] + "/README]]" if item.get("vault_entry") else "无"
+            if state == "archived" and item.get("vault_entry"):
+                entry = "已从 Vault 隐藏"
             context_link = "纯文本路径；不建 Vault 链接" if item["link_policy"] == "plain-text" else "[Agent 接续](" + (self.root / item["path"] / "agent/README.md").as_uri() + ")"
-            rows["archive" if state == "archived" or item.get("legacy") else "projects"].append(f"| {item['name']} | {item['id']} | {state} | {entry} | `{self.root / item['path']}` | {context_link} |")
+            rows["archive" if state == "archived" else "projects"].append(f"| {item['name']} | {item['id']} | {state} | {entry} | `{self.root / item['path']}` | {context_link} |")
         outputs = []
         for area, title in (("projects", "项目总览"), ("archive", "归档项目索引")):
             path = self.path("myself/03-项目/" + title + ".md")
@@ -398,6 +928,116 @@ class ProjectWorkspace:
                 raise UserError("搭建计划缺少唯一自动路径区块，不覆盖人工内容。")
             block = "<!-- agent-architecture:start -->\n<!-- 由登记表生成当前路径映射，不在此手工编辑 -->\n| 编号 | 完整资料路径（工作区相对路径） | Vault 入口 | 策略 |\n|---|---|---|---|\n" + "\n".join(f"| {p['id']} | `{p['path']}` | `{p.get('vault_entry') or '无'}` | {p['link_policy']} |" for p in data["projects"]) + "\n<!-- agent-architecture:end -->"
             outputs.append((architecture, re.sub(pattern, lambda _: block, before, flags=re.S), before))
+        return outputs
+
+    def lifecycle_index_outputs(self, identity: str, state: str) -> list[tuple[Path, str, str]]:
+        """Move one known project row between indexes without reading other STATUS files."""
+        if state not in STATES:
+            raise UserError("项目生命周期状态无效，未更新索引。")
+        pattern = r"<!-- agent-index:start -->.*?<!-- agent-index:end -->"
+        titles = ("项目总览", "归档项目索引")
+        blocks: dict[str, tuple[Path, str, str, list[str]]] = {}
+        locations: list[str] = []
+        row_cells: list[str] = []
+        for title in titles:
+            path = self.path("myself/03-项目/" + title + ".md")
+            if not path.is_file():
+                raise UserError("管理索引文件缺失，未切换项目状态：\n" + str(path))
+            before = self.read(path)
+            matches = list(re.finditer(pattern, before, re.S))
+            if len(matches) != 1:
+                raise UserError("索引管理区块缺失或重复，未切换项目状态：\n" + str(path))
+            match = matches[0]
+            lines = match.group().splitlines()
+            blocks[title] = (path, before, match.group(), lines)
+            for line in lines:
+                cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+                if len(cells) >= 3 and cells[1] == identity:
+                    locations.append(title)
+                    row_cells = cells
+        if len(locations) != 1 or len(row_cells) < 6:
+            raise UserError(
+                "项目索引中应有且仅有一条完整项目记录，实际找到 " + str(len(locations)) + " 条；未切换项目状态。"
+            )
+
+        destination = "归档项目索引" if state == "archived" else "项目总览"
+        row_cells[2] = state
+        item = self.project(identity)
+        if state == "archived":
+            row_cells[3] = "已从 Vault 隐藏" if item.get("vault_entry") else "无"
+        else:
+            row_cells[3] = ("[[" + item["vault_entry"][len("myself/"):] + "/README]]"
+                            if item.get("vault_entry") else "无")
+        updated_row = "| " + " | ".join(row_cells) + " |"
+        source = locations[0]
+        output = []
+        for title in titles:
+            path, before, old_block, lines = blocks[title]
+            if title == source:
+                lines = [line for line in lines if not (
+                    len([cell.strip() for cell in line.strip().strip("|").split("|")]) >= 3
+                    and [cell.strip() for cell in line.strip().strip("|").split("|")][1] == identity
+                )]
+                if source == destination:
+                    lines.insert(-1, updated_row)
+            if title == destination and source != destination:
+                lines.insert(-1, updated_row)
+            new_block = "\n".join(lines)
+            after = before.replace(old_block, new_block, 1)
+            output.append((path, after, before))
+        return output
+
+    def delete_index_outputs(self, after_data: dict, identity: str) -> list[tuple[Path, str, str]]:
+        """Remove only the deleted project's rows, preserving other index entries."""
+        outputs: list[tuple[Path, str, str]] = []
+        removed_rows = 0
+        pattern = r"<!-- agent-index:start -->.*?<!-- agent-index:end -->"
+        for title in ("项目总览", "归档项目索引"):
+            path = self.path("myself/03-项目/" + title + ".md")
+            if not path.is_file():
+                raise UserError("管理索引文件缺失，未删除项目：\n" + str(path))
+            before = self.read(path)
+            matches = list(re.finditer(pattern, before, re.S))
+            if len(matches) != 1:
+                raise UserError("索引管理区块缺失或重复，不删除项目：\n" + str(path))
+            match = matches[0]
+            lines = match.group().splitlines()
+            kept = []
+            for line in lines:
+                cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+                if len(cells) >= 3 and cells[1] == identity:
+                    removed_rows += 1
+                    continue
+                kept.append(line)
+            block = "\n".join(kept)
+            after = before[:match.start()] + block + before[match.end():]
+            outputs.append((path, after, before))
+        if removed_rows != 1:
+            raise UserError(
+                "项目索引中应有且仅有一条目标项目记录，实际找到 " + str(removed_rows) + " 条；未删除项目。"
+            )
+
+        architecture = self.path("myself/99-系统/搭建计划.md")
+        if architecture.exists():
+            before = self.read(architecture)
+            architecture_pattern = r"<!-- agent-architecture:start -->.*?<!-- agent-architecture:end -->"
+            matches = list(re.finditer(architecture_pattern, before, re.S))
+            if len(matches) != 1:
+                raise UserError("搭建计划缺少唯一自动路径区块，不删除项目：\n" + str(architecture))
+            block = (
+                "<!-- agent-architecture:start -->\n"
+                "<!-- 由登记表生成当前路径映射，不在此手工编辑 -->\n"
+                "| 编号 | 完整资料路径（工作区相对路径） | Vault 入口 | 策略 |\n"
+                "|---|---|---|---|\n"
+                + "\n".join(
+                    f"| {project['id']} | `{project['path']}` | `{project.get('vault_entry') or '无'}` | {project['link_policy']} |"
+                    for project in after_data["projects"]
+                )
+                + "\n<!-- agent-architecture:end -->"
+            )
+            match = matches[0]
+            after = before[:match.start()] + block + before[match.end():]
+            outputs.append((architecture, after, before))
         return outputs
 
     def update_indexes(self, data: dict):
@@ -458,117 +1098,22 @@ class ProjectWorkspace:
         return records
 
     def plan_move(self, identity: str, resume: bool, context: TaskContext) -> dict:
-        item = self.project(identity)
-        if item["legacy"]:
-            raise UserError("旧 L-归档应作为新目标另建编号项目；原归档保持原位。")
-        expected_area = "archive" if resume else "projects"
-        if not item["path"].startswith(expected_area + "/"):
-            raise UserError("项目当前位置不符合此次操作。")
-        source = self.path(item["path"])
-        target = self.path(("projects" if resume else "archive") + "/" + source.name)
-        if not source.is_dir() or target.exists():
-            raise UserError("来源不存在或目标已存在，停止移动。")
-        if source.stat().st_dev != target.parent.stat().st_dev:
-            raise UserError("归档和项目目录需位于同一文件系统，避免跨盘部分移动。")
-        for name in MANAGEMENT_FILES:
-            self.read(self.path(item["path"] + "/" + name))
-        status = self.read(self.path(item["path"] + "/agent/STATUS.md"))
-        if field(status, "project_id") != identity or field(status, "status") not in STATES:
-            raise UserError("项目状态文件不一致。")
-        entry = item.get("vault_entry")
-        if entry:
-            link = self.path(entry, allow_link=True)
-            if not linked(link) or link.resolve() != source.resolve():
-                raise UserError("Obsidian 入口不是指向当前项目的已登记联接，停止移动。")
-        self.index_outputs(self.registry())
-        records = self.manifest(source, context)
-        payload = {"registry": self.read(self.registry_path), "records": records, "item": item, "resume": resume}
-        token = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-        return {"project_id": identity, "source": str(source), "target": str(target), "resume": resume, "token": token, "file_count": sum(v != "directory" for v in records.values()), "backup": "备份/验收证据由用户核对，本操作不宣称已验证", "entry": entry or "无", "records": records}
+        """Physical project relocation is intentionally not part of lifecycle actions."""
+        raise UserError("项目归档只切换 STATUS 状态，不支持移动目录。")
 
     def move(self, plan: dict, reason: str, context: TaskContext) -> dict:
-        if not reason.strip():
-            raise UserError("请填写归档原因或重新启用后的下一步。")
-        with self.lock("Resume" if plan["resume"] else "Archive"):
-            current = self.plan_move(plan["project_id"], plan["resume"], context)
-            if current["token"] != plan["token"] or current["target"] != plan["target"]:
-                raise UserError("项目或登记表在预览后变化，请重新预检。")
-            context.checkpoint()
-            source, target = Path(current["source"]), Path(current["target"])
-            data = self.registry(); observed = self.read(self.registry_path)
-            item = next(p for p in data["projects"] if p["id"] == plan["project_id"])
-            state = "active" if plan["resume"] else "archived"
-            journal = self.path("agent/history/" + uuid4().hex + "-move.json")
-            self.write(journal, json.dumps({**current, "reason": reason, "state": "prepared"}, ensure_ascii=False, indent=2))
-            phase, moved = "rename_directory", False
-            try:
-                os.rename(source, target)
-                moved = True
-                phase = "verify_files"
-                # Do not interrupt critical directory/registry/link switching.
-                if self.manifest(target, TaskContext()) != current["records"]:
-                    raise UserError("移动后文件清单不同，保留现场并停止。")
-                if item.get("vault_entry"):
-                    phase = "relink_obsidian"
-                    entry = self.path(item["vault_entry"], allow_link=True)
-                    if not linked(entry) or entry.resolve() != source.resolve():
-                        raise UserError("入口在移动期间变化，请按移动记录修复。")
-                    if os.name == "nt":
-                        os.rmdir(entry)  # Remove only the verified junction, never recurse.
-                    else:
-                        entry.unlink()
-                    self._link(item["vault_entry"], target)
-                item["path"] = target.relative_to(self.root).as_posix()
-                phase = "update_documents"
-                for name in ("README.md", "AGENTS.md", "agent/STATUS.md"):
-                    path = self.path(item["path"] + "/" + name)
-                    before = self.read(path)
-                    after = before.replace(str(source), str(target)).replace(source.as_posix(), target.as_posix())
-                    if name == "agent/STATUS.md":
-                        after = replace_state(after, state)
-                        after += f"\n\n## {today()} — {'重新启用' if plan['resume'] else '归档'}\n\n{reason.strip()}\n备份验证：以已有证据为准，本次未执行备份验证。\n"
-                    self.write(path, after, before)
-                handoff = self.path(item["path"] + "/agent/HANDOFF.md")
-                before = self.read(handoff)
-                self.write(handoff, before.rstrip() + f"\n\n## {today()} — 管家{'重新启用' if plan['resume'] else '归档'}\n- 原位置：`{source}`\n- 新位置：`{target}`\n- 原因/下一步：{reason.strip()}\n- 验证：移动后 {current['file_count']} 个文件哈希及目录清单一致；未执行备份恢复验证。\n- 原代码绝对路径和 Git/同步设置需核对，未自动改写业务文件。\n", before)
-                phase = "save_registry"
-                self.save_registry(data, observed)
-                phase = "update_indexes"
-                self.update_indexes(data)
-                phase = "complete_receipt"
-                before = self.read(journal)
-                self.write(journal, json.dumps({**current, "reason": reason, "state": "completed"}, ensure_ascii=False, indent=2), before)
-            except (OSError, UserError) as exc:
-                intact = False
-                if not moved and source.is_dir() and not target.exists():
-                    try:
-                        intact = self.manifest(source, TaskContext()) == current["records"]
-                    except (OSError, UserError):
-                        pass
-                receipt = {**current, "reason": reason, "state": "failed_before_move" if intact else "needs_review",
-                           "phase": phase, "error_type": type(exc).__name__, "error": str(exc),
-                           "winerror": getattr(exc, "winerror", None)}
-                try:
-                    before = self.read(journal)
-                    self.write(journal, json.dumps(receipt, ensure_ascii=False, indent=2), before)
-                except (OSError, UserError):
-                    # Preserve the original operation failure and prepared receipt.
-                    pass
-                message = ("目录未移动，文件清单与预检一致。请关闭占用项目目录的程序，再重新预检。" if intact else
-                           "移动过程未全部完成，禁止盲目重试。请保留目录并按记录核对。")
-                raise UserError(message + "\n失败步骤：" + phase + "\n原因：" + str(exc) + "\n记录：" + str(journal)) from exc
-        return {"project_id": item["id"], "directory": str(target), "state": state, "verified_files": current["file_count"]}
-
-
+        """Keep legacy callers from moving a project directory."""
+        raise UserError("项目归档只切换 STATUS 状态，不支持移动目录。")
 def default_template(filename: str) -> str:
     if filename == "AGENTS.md":
         return "# {{ID}} — {{NAME}} 项目规则\n\n- 当前完整目录：`{{PATH}}`。\n- Obsidian 入口：`{{VAULT}}`。\n- 先读 agent/README → STATUS → TASKS → HANDOFF 最近两条。\n- 项目之间隔离；保留原文与用户修改，不写凭据，不自动提交发布。\n- 状态以 STATUS 为准，任务以 TASKS 为准，日志追加 HANDOFF。\n"
-    kinds = {"README.md": "project-agent-index", "STATUS.md": "project-status", "TASKS.md": "project-tasks", "HANDOFF.md": "project-handoff"}
+    kinds = {"README.md": "project-agent-index", "STATUS.md": "project-status", "TASKS.md": "project-tasks", "HANDOFF.md": "project-handoff", "MILESTONES.md": "project-milestones"}
     front = "---\ntitle: \"{{NAME}} " + filename + "\"\ncreated: {{DATE}}\nupdated: {{DATE}}\nstatus: " + ("{{STATE}}" if filename == "STATUS.md" else "active") + "\ntype: " + kinds[filename] + "\nproject_id: {{ID}}\ntags: [project, agent]\n---\n\n"
     contents = {
-        "README.md": "# {{NAME}} 接续入口\n\n先读 [项目规则](../AGENTS.md) → [当前状态](STATUS.md) → [任务](TASKS.md) → [日志与交接](HANDOFF.md)。\n只维护一份状态和任务真源；业务目录按需建立。\n",
+        "README.md": "# {{NAME}} 接续入口\n\n先读 [项目规则](../AGENTS.md) → [当前状态](STATUS.md) → [任务](TASKS.md) → [日志与交接](HANDOFF.md)。\n只维护一份状态和任务真源；业务目录按需建立。\n\n项目里程碑由用户在 [MILESTONES.md](MILESTONES.md) 中维护，应用仅负责展示。\n",
         "STATUS.md": "# {{NAME}} 当前状态\n\n## 目标与验收\n- 目标：{{GOAL}}\n- 验收条件：待补。\n\n## 当前进度\n- 生命周期：{{STATE}}\n- 当前阶段：待明确。\n- 下一步：明确验收条件并选择第一项任务。\n- 阻塞：待补。\n- 任务入口：[TASKS.md](TASKS.md)。\n\n## 备份与恢复\n- 备份与恢复验证：未验证。\n",
         "TASKS.md": "# {{NAME}} 任务清单\n\n本文件是唯一任务真源；已有任务清单时改为指向它，避免重复维护。\n\n| 编号 | 动作 | 验收条件 | 状态 | 证据 |\n|---|---|---|---|---|\n| T-001 | 明确验收条件 | STATUS 写清可验证完成条件 | todo | 待补 |\n",
         "HANDOFF.md": "# {{NAME}} 日志与交接\n\n按时间追加，保留历史。记录实际改动、验证、未完成和下一步。\n\n## {{DATE}} — 初始化\n- 目标：{{GOAL}}\n- 已做：建立管理结构。业务、备份与运行环境未验证。\n- 下一步：明确验收条件。\n",
+        "MILESTONES.md": "# {{NAME}} 项目里程碑\n\n本文件由你在 Obsidian 中维护。应用只读取并展示这里的内容。\n\n| 状态 | 里程碑 | 目标日期 |\n|---|---|---|\n",
     }
     return front + contents[filename]

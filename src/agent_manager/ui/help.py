@@ -14,7 +14,7 @@ class GuideDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Agent 管家 · 使用说明")
+        self.setWindowTitle("小年助手 · 使用说明")
         self.resize(1020, 730)
         self.setMinimumSize(780, 540)
         layout = QVBoxLayout(self)

@@ -16,3 +16,4 @@ auth.json
 *.pem
 *.key
 qa/
+docs/ui-preview-fluent/fixture/

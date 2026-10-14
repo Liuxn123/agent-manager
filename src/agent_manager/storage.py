@@ -5,9 +5,10 @@ import os
 import sqlite3
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from uuid import uuid4
 
 from .domain import Resource, UserError
 from .portable import portable_directory, encode_paths, decode_paths
@@ -60,8 +61,47 @@ class Store:
                     started_at TEXT, finished_at TEXT, log TEXT, result TEXT
                 );
                 CREATE INDEX IF NOT EXISTS tasks_resource ON tasks(resource_id);
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS planned_tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('task', 'schedule')),
+                    due_date TEXT,
+                    project_id TEXT,
+                    project_root TEXT,
+                    goal_id TEXT,
+                    priority TEXT NOT NULL DEFAULT '' CHECK(priority IN ('', 'high', 'medium', 'low')),
+                    status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned', 'active', 'done')),
+                    source TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('ai', 'manual')),
+                    notes TEXT NOT NULL DEFAULT '',
+                    completion_note TEXT NOT NULL DEFAULT '',
+                    source_ref TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS planned_tasks_due ON planned_tasks(due_date, status);
+                CREATE INDEX IF NOT EXISTS planned_tasks_project ON planned_tasks(project_id, status);
+                CREATE INDEX IF NOT EXISTS planned_tasks_source ON planned_tasks(source, status);
+                PRAGMA user_version=3;
             """)
+        with self.connect() as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(planned_tasks)")}
+        if "source_ref" not in columns:
+            with self.connect() as db:
+                db.execute("ALTER TABLE planned_tasks ADD COLUMN source_ref TEXT")
+        if "goal_id" not in columns:
+            with self.connect() as db:
+                db.execute("ALTER TABLE planned_tasks ADD COLUMN goal_id TEXT")
+        if "project_root" not in columns:
+            with self.connect() as db:
+                db.execute("ALTER TABLE planned_tasks ADD COLUMN project_root TEXT")
+        if "completion_note" not in columns:
+            with self.connect() as db:
+                db.execute("ALTER TABLE planned_tasks ADD COLUMN completion_note TEXT NOT NULL DEFAULT ''")
+        with self.connect() as db:
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS planned_tasks_source_ref ON planned_tasks(source_ref)")
+            db.execute("CREATE INDEX IF NOT EXISTS planned_tasks_goal ON planned_tasks(goal_id, status)")
+            db.execute("CREATE INDEX IF NOT EXISTS planned_tasks_project_root ON planned_tasks(project_root, project_id, status)")
+            db.execute("PRAGMA user_version=5")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -164,3 +204,222 @@ class Store:
         with self.connect() as db:
             row = db.execute("SELECT * FROM tasks WHERE id=?", (identity,)).fetchone()
         return dict(row) if row else None
+
+    @staticmethod
+    def _validate_planned_task(values: dict[str, Any]) -> dict[str, str | None]:
+        title = str(values.get("title", "")).strip()
+        if not title or len(title) > 240 or "\n" in title or "\r" in title:
+            raise UserError("任务名称必须为 1–240 字的一行文本。")
+        kind = str(values.get("kind", "task"))
+        if kind not in {"task", "schedule"}:
+            raise UserError("任务类型无效。")
+        due_date = values.get("due_date")
+        due_date = str(due_date).strip() if due_date else None
+        if due_date:
+            try:
+                date.fromisoformat(due_date)
+            except ValueError as exc:
+                raise UserError("日期请使用 YYYY-MM-DD 格式。") from exc
+        project_id = str(values.get("project_id", "")).strip() or None
+        if project_id and len(project_id) > 120:
+            raise UserError("项目编号过长。")
+        project_root = str(values.get("project_root", "")).strip() or None
+        if project_root and len(project_root) > 4000:
+            raise UserError("项目工作区路径过长。")
+        goal_id = str(values.get("goal_id", "")).strip() or None
+        if goal_id and len(goal_id) > 120:
+            raise UserError("目标编号过长。")
+        priority = str(values.get("priority", ""))
+        if priority not in {"", "high", "medium", "low"}:
+            raise UserError("优先级无效。")
+        status = str(values.get("status", "planned"))
+        if status not in {"planned", "active", "done"}:
+            raise UserError("任务状态无效。")
+        source = str(values.get("source", "manual"))
+        if source not in {"ai", "manual"}:
+            raise UserError("任务来源无效。")
+        notes = str(values.get("notes", ""))
+        if len(notes) > 20_000:
+            raise UserError("任务备注不能超过 20000 字。")
+        return {"title": title, "kind": kind, "due_date": due_date,
+                "project_id": project_id, "project_root": project_root, "goal_id": goal_id,
+                "priority": priority, "status": status,
+                "source": source, "notes": notes}
+
+    def add_planned_task(self, values: dict[str, Any], source_ref: str | None = None,
+                         sync_documents: bool = True) -> dict[str, Any] | None:
+        """Create one shared, date-precise task or schedule record."""
+        clean = self._validate_planned_task(values)
+        identity, timestamp = uuid4().hex, now()
+        with self.connect() as db:
+            db.execute(
+                """INSERT OR IGNORE INTO planned_tasks
+                   (id, title, kind, due_date, project_id, project_root, goal_id, priority, status, source, notes, source_ref, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (identity, clean["title"], clean["kind"], clean["due_date"], clean["project_id"], clean["project_root"], clean["goal_id"],
+                 clean["priority"], clean["status"], clean["source"], clean["notes"], source_ref, timestamp, timestamp),
+            )
+        created = self.planned_task(identity)
+        if created:
+            if sync_documents and not source_ref:
+                self._export_project_task_documents(created)
+            return created
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM planned_tasks WHERE source_ref=?", (source_ref,)).fetchone()
+        return dict(row) if row else None
+
+    def update_planned_task(self, identity: str, values: dict[str, Any], sync_documents: bool = True) -> dict[str, Any]:
+        clean = self._validate_planned_task(values)
+        existing = self.planned_task(identity)
+        if not existing:
+            raise UserError("任务已不存在，请刷新后重试。")
+        if existing["source"] == "ai" and clean["source"] != "ai":
+            raise UserError("AI 规划任务不能通过编辑改为手动来源。")
+        if existing["source"] == "ai" and existing["status"] != "done" and clean["status"] == "done":
+            raise UserError("AI 规划任务必须由 Agent 执行并验证后才能完成。")
+        with self.connect() as db:
+            cursor = db.execute(
+                """UPDATE planned_tasks SET title=?, kind=?, due_date=?, project_id=?, project_root=?, goal_id=?, priority=?,
+                   status=?, source=?, notes=?, updated_at=? WHERE id=?""",
+                (clean["title"], clean["kind"], clean["due_date"], clean["project_id"], clean["project_root"], clean["goal_id"],
+                 clean["priority"], clean["status"], clean["source"], clean["notes"], now(), identity),
+            )
+            if not cursor.rowcount:
+                raise UserError("任务已不存在，请刷新后重试。")
+        updated = self.planned_task(identity)
+        if sync_documents and updated:
+            self._export_project_task_documents(updated)
+        return updated
+
+    def set_planned_task_status(self, identity: str, status: str, sync_documents: bool = True,
+                                manual_override: bool = False) -> dict[str, Any]:
+        if status not in {"planned", "active", "done"}:
+            raise UserError("任务状态无效。")
+        existing = self.planned_task(identity)
+        if not existing:
+            raise UserError("任务已不存在，请刷新后重试。")
+        if existing["source"] == "ai" and status == "done" and not manual_override:
+            raise UserError("AI 规划任务必须由 Agent 执行并验证后才能完成。")
+        with self.connect() as db:
+            cursor = db.execute("UPDATE planned_tasks SET status=?, updated_at=? WHERE id=?", (status, now(), identity))
+            if not cursor.rowcount:
+                raise UserError("任务已不存在，请刷新后重试。")
+        updated = self.planned_task(identity)
+        if sync_documents and updated:
+            self._export_project_task_documents(updated)
+        return updated
+
+    def complete_ai_planned_task(self, identity: str, completion_note: str,
+                                  sync_documents: bool = True) -> dict[str, Any]:
+        """Persist the agent's verified completion record and complete the AI task."""
+        completion_note = str(completion_note or "").strip()
+        if not completion_note:
+            raise UserError("AI 必须提供完成记录后才能完成任务。")
+        if len(completion_note) > 6000:
+            raise UserError("AI 完成记录不能超过 6000 字。")
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE planned_tasks SET status='done', completion_note=?, updated_at=? "
+                "WHERE id=? AND source='ai' AND status='active'",
+                (completion_note, now(), identity),
+            )
+            if not cursor.rowcount:
+                raise UserError("只有进行中的 AI 规划任务可以由 Agent 标记完成；请刷新任务后重试。")
+        updated = self.planned_task(identity)
+        if sync_documents and updated:
+            self._export_project_task_documents(updated)
+        return updated
+
+    def delete_planned_task(self, identity: str) -> None:
+        existing = self.planned_task(identity)
+        with self.connect() as db:
+            db.execute("DELETE FROM planned_tasks WHERE id=?", (identity,))
+        if existing:
+            self._export_project_task_documents(existing)
+
+    def _export_project_task_documents(self, task: dict[str, Any]) -> None:
+        project_id = task.get("project_id")
+        project_root = task.get("project_root")
+        if not project_id or not project_root:
+            return
+        from .project_task_documents import export_project_task_documents
+        from .project_workspaces import ProjectWorkspace
+        export_project_task_documents(self, ProjectWorkspace(Path(project_root)), project_id)
+
+    def planned_task(self, identity: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM planned_tasks WHERE id=?", (identity,)).fetchone()
+        return dict(row) if row else None
+
+    def planned_task_source_refs(self) -> set[str]:
+        with self.connect() as db:
+            return {row[0] for row in db.execute("SELECT source_ref FROM planned_tasks WHERE source_ref IS NOT NULL")}
+
+    def sync_legacy_project_task_sources(self, project_root: str, project_id: str,
+                                         sources_by_title: dict[str, str],
+                                         default_source: str | None = None) -> int:
+        """Keep imported project-task source labels aligned with their Markdown section."""
+        prefix = f"legacy:project:{project_root}:{project_id}:"
+        changed = 0
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id, title, source_ref, source FROM planned_tasks "
+                "WHERE project_root=? AND project_id=? AND source_ref IS NOT NULL",
+                (project_root, project_id),
+            ).fetchall()
+            for row in rows:
+                desired = sources_by_title.get(row["title"], default_source)
+                if (row["source_ref"].startswith(prefix) and desired in {"ai", "manual"}
+                        and row["source"] != desired):
+                    source_ref = row["source_ref"].replace(
+                        f":{row['source']}:task:", f":{desired}:task:", 1)
+                    duplicate = db.execute(
+                        "SELECT 1 FROM planned_tasks WHERE source_ref=? AND id<>?",
+                        (source_ref, row["id"]),
+                    ).fetchone()
+                    if duplicate:
+                        continue
+                    db.execute("UPDATE planned_tasks SET source=?, source_ref=?, updated_at=? WHERE id=?",
+                               (desired, source_ref, now(), row["id"]))
+                    changed += 1
+        return changed
+
+    def planned_task_goal_progress(self) -> dict[str, dict[str, int]]:
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT goal_id, COUNT(*) AS total,
+                          SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS done
+                   FROM planned_tasks WHERE goal_id IS NOT NULL GROUP BY goal_id"""
+            ).fetchall()
+        return {row["goal_id"]: {"total": row["total"], "done": row["done"] or 0} for row in rows}
+
+    def planned_tasks(self, *, due_date: str | None = None, project_id: str | None = None,
+                      project_root: str | None = None,
+                      goal_id: str | None = None, status: str | None = None, source: str | None = None,
+                      include_undated: bool = False, limit: int = 5000) -> list[dict[str, Any]]:
+        clauses, args = [], []
+        if due_date is not None:
+            clauses.append("(due_date=? OR (? AND due_date IS NULL))")
+            args.extend((due_date, int(include_undated)))
+        if project_id is not None:
+            clauses.append("project_id=?")
+            args.append(project_id)
+        if project_root is not None:
+            clauses.append("project_root=?")
+            args.append(project_root)
+        if goal_id is not None:
+            clauses.append("goal_id=?")
+            args.append(goal_id)
+        if status is not None:
+            clauses.append("status=?")
+            args.append(status)
+        if source is not None:
+            clauses.append("source=?")
+            args.append(source)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM planned_tasks" + where + " ORDER BY due_date IS NULL, due_date, created_at DESC LIMIT ?",
+                (*args, max(1, min(int(limit), 5000))),
+            ).fetchall()
+        return [dict(row) for row in rows]

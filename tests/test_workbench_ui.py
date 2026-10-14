@@ -17,9 +17,10 @@ from agent_manager.storage import Store
 from agent_manager.runtime import TaskContext
 from agent_manager.project_workspaces import ProjectWorkspace
 from agent_manager.workbench import Daily, Catalog, TYPES, work_root, project_context, summaries
+from agent_manager.planbook import PlanBook
 from agent_manager.ui.window import MainWindow
 from agent_manager.ui.workbench import CatalogDialog
-from agent_manager.ui.agenda import AgendaPanel
+from agent_manager.ui.agenda import AgendaPanel, MODE_CUSTOM, MODE_MONTH, MODE_WEEK, agenda_period
 
 
 class WorkbenchUITests(unittest.TestCase):
@@ -71,15 +72,14 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(self.feedback, [], "Unexpected GUI feedback in headless test")
 
     def test_daily_is_default_and_checkbox_and_obsidian_edit_share_original_file(self):
-        self.assertEqual([self.window.navigation.item(i).text() for i in range(6)], ["今日", "项目", "Agent", "资源库", "数据安全", "设置"])
+        self.assertEqual([self.window.navigation.item(i).text() for i in range(7)], ["工作台", "计划", "项目", "Agent", "资源库", "数据安全", "设置"])
         self.assertIs(self.window.stack.currentWidget(), self.window.today_page)
         page = self.window.today_page
-        self.assertEqual(page.schedule.item(0).text(), "09:00 开发")
+        self.assertEqual(page.report["schedule"][0]["text"], "09:00 开发")
         page.tasks.item(0).setCheckState(Qt.CheckState.Checked)
         self.until(lambda: "[x] 验证恢复" in self.daily.load()["text"] and page.tasks.isEnabled())
         # Windows denies rename while Python's read handle is open. Finish our own
         # observation before simulating the external editor's atomic replacement.
-        page.clock_timer.stop()
         page.reload_timer.stop()
         self.until(lambda: not page.worker)
         path = Path(self.daily.load()["path"])
@@ -210,6 +210,90 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(self.window.resource_pages[3].selected().id, self.agent.id)
         self.assertEqual(self.window.safety_tabs.currentIndex(), 0)
         self.assertFalse(self.window.timer.isActive())
+
+    def test_plan_page_has_week_and_month_ranges_and_reuses_daily_markdown(self):
+        week = date(2028, 2, 29)
+        self.assertEqual(agenda_period(MODE_WEEK, week), (date(2028, 2, 28), date(2028, 3, 5)))
+        self.assertEqual(agenda_period(MODE_MONTH, week), (date(2028, 2, 1), date(2028, 2, 29)))
+
+        self.window.today_page.agenda_button.click()
+        self.assertEqual(self.window.navigation.currentRow(), self.window.PLAN)
+        page = self.window.planning_page
+        self.until(lambda: not page.agenda.worker and len(page.agenda.rows) == 2)
+        self.assertEqual(page.tabs.count(), 4)
+        self.assertEqual([metric.title.text() for metric in page.dashboard.metrics],
+                         ["本周计划", "本月重点项目", "里程碑", "周期任务"])
+        self.assertFalse(page.tabs.tabBar().isVisible())
+        self.assertEqual(page.dashboard.view_mode, MODE_WEEK)
+        page.dashboard.set_view(MODE_MONTH)
+        self.until(lambda: not page.agenda.worker and len(page.agenda.rows) == 2)
+        self.assertEqual(page.agenda.query()[:2], agenda_period(MODE_MONTH, page.dashboard.anchor))
+        selected = date.today() + timedelta(days=2)
+        page.dashboard.set_view(MODE_CUSTOM)
+        page.dashboard.date_control.setDate(QDate(selected.year, selected.month, selected.day))
+        self.assertEqual(page.agenda.query()[:2], (selected, selected))
+        self.until(lambda: not page.agenda.worker)
+        page.dashboard.show_current_week()
+        self.until(lambda: not page.agenda.worker and len(page.agenda.rows) == 2)
+        item = next(i for i, row in enumerate(page.agenda.rows) if row["kind"] == "任务")
+        page.agenda.table.selectRow(item)
+        page.agenda.open_selected()
+        self.assertEqual(self.window.navigation.currentRow(), self.window.TODAY)
+        self.until(lambda: self.window.today_page.report and self.window.today_page.report["day"] == date.today().isoformat())
+
+    def test_plan_goals_milestones_recurring_tasks_and_templates_use_markdown(self):
+        book = PlanBook(work_root(self.store))
+        due = date.today().isoformat()
+        book.save("goal", {"title": "年度目标", "status": "active", "due": due}, "目标正文")
+        book.save("milestone", {"title": "首期验收", "status": "planned", "due": due,
+                                 "project_id": self.project["project_id"]}, "验收内容")
+        book.save("recurring", {"title": "每日复盘", "status": "planned", "start": due,
+                                 "due": due, "frequency": "daily"}, "周期任务说明")
+        book.save("template", {"title": "开始工作", "status": "planned"}, "## 今日任务\n\n- 检查计划页\n")
+
+        self.window.navigation.setCurrentRow(self.window.PLAN)
+        page = self.window.planning_page
+        self.until(lambda: not page.agenda.worker and
+                   any(row["kind"] == "里程碑" for row in page.agenda.rows) and
+                   any(row["kind"] == "周期任务" for row in page.agenda.rows))
+        cycle_row = next(i for i, row in enumerate(page.agenda.rows) if row["kind"] == "周期任务")
+        page.agenda.table.selectRow(cycle_row)
+        self.assertTrue(page.agenda.add_occurrence_button.isEnabled())
+        page.agenda.add_occurrence_button.click()
+        self.until(lambda: "↻ 每日复盘" in Daily(work_root(self.store)).load()["text"] and
+                   not page.agenda.worker and not self.window.jobs)
+        self.assertFalse(any(row["kind"] == "周期任务" and row["day"] == due for row in page.agenda.rows))
+
+        page.tabs.setCurrentIndex(2)
+        records = page.records
+        self.until(lambda: not records.worker and len(records.items) == 4)
+        records.kind.setCurrentIndex(records.kind.findData("template"))
+        self.assertEqual(len(records.filtered), 1)
+        records.table.selectRow(0)
+        self.assertTrue(records.apply_button.isEnabled())
+        records.target_day.setDate(QDate.currentDate())
+        records.apply_button.click()
+        self.until(lambda: "检查计划页" in Daily(work_root(self.store)).load()["text"] and not self.window.jobs)
+
+    def test_project_timeline_filters_and_orders_linked_plan_records(self):
+        book = PlanBook(work_root(self.store))
+        project_id = self.project["project_id"]
+        book.save("milestone", {"title": "后续里程碑", "status": "planned", "due": "2030-06-20",
+                                 "project_id": project_id}, "后续内容")
+        book.save("goal", {"title": "项目目标", "status": "active", "start": "2030-06-01",
+                            "project_id": project_id}, "目标详情")
+        book.save("milestone", {"title": "其他项目事项", "status": "planned", "due": "2030-06-10",
+                                 "project_id": "P-OTHER"}, "其他内容")
+        page = self.window.planning_page
+        page.tabs.setCurrentIndex(3)
+        self.until(lambda: not page.timeline.worker and len(page.timeline.items) == 3)
+        timeline = page.timeline
+        self.assertEqual(timeline.project.count(), 3)
+        timeline.project.setCurrentIndex(timeline.project.findData(project_id))
+        self.assertEqual([timeline.filtered[row]["title"] for row in range(len(timeline.filtered))],
+                         ["项目目标", "后续里程碑"])
+        self.assertEqual(timeline.filtered[0]["metadata"]["start"], "2030-06-01")
+        self.assertEqual(timeline.filtered[1]["metadata"]["due"], "2030-06-20")
 
     def test_safety_workspace_selects_agent_and_exposes_existing_backup_actions(self):
         self.window.navigation.setCurrentRow(self.window.SAFETY)
@@ -485,37 +569,39 @@ class WorkbenchUITests(unittest.TestCase):
         page = self.window.today_page
         def fill(dialog):
             dialog.title.setText("关键恢复检查")
-            dialog.priority.setCurrentText("高")
-            dialog.time.setText("10:00")
             return QDialog.DialogCode.Accepted
         with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
             page.add_entry("今日任务")
         self.until(lambda: len(page.report["tasks"]) == 2)
-        self.assertIn("[高] 关键恢复检查 @10:00", self.daily.load()["text"])
-        self.assertEqual(page.metrics[1].value.text(), "1 项")
-        self.assertIn("关键恢复检查", page.focus_items.item(0).text())
+        self.assertIn("关键恢复检查", self.daily.load()["text"])
+        self.assertEqual(page.metrics[0].value.text(), "0 / 2")
         item = page.tasks.item(1)
         rectangle = page.tasks.visualItemRect(item)
         QTest.mouseClick(page.tasks.viewport(), Qt.MouseButton.LeftButton, pos=rectangle.topLeft() + QPoint(12, 20))
-        self.until(lambda: "[x] [高]" in self.daily.load()["text"] and page.tasks.isEnabled())
+        self.until(lambda: "[x] 关键恢复检查" in self.daily.load()["text"] and page.tasks.isEnabled())
         self.assertEqual(page.metrics[0].value.text(), "1 / 2")
-        self.assertEqual(page.metrics[1].value.text(), "0 项")
-        self.assertNotIn("关键恢复检查", page.focus_items.item(0).text())
         self.assertNotIn("关键恢复检查", str(self.store.tasks()))
 
-    def test_focus_timer_is_manual_pauses_and_stops_on_window_close(self):
+    def test_dashboard_matches_prototype_sections_and_recent_agent_opens_detail(self):
         page = self.window.today_page
-        self.assertFalse(page.focus_timer.isActive())
-        with patch("agent_manager.ui.workbench.time.monotonic", return_value=100):
-            page.toggle_focus()
-        with patch("agent_manager.ui.workbench.time.monotonic", return_value=165):
-            page.toggle_focus()
-        self.assertEqual(page.focus_elapsed, 65)
-        self.assertIn("01:05", page.focus_button.text())
-        self.assertFalse(page.focus_timer.isActive())
-        page.toggle_focus()
-        self.window.close()
-        self.assertFalse(page.focus_timer.isActive())
+        self.assertEqual([metric.title.text() for metric in page.metrics],
+                         ["今日任务", "进行中项目", "运行中的 Agent", "待处理事项"])
+        self.assertEqual([page.task_views.tabText(index).split(" · ")[0] for index in range(3)],
+                         ["任务", "日程", "Todo"])
+        self.assertEqual(page.schedule_items.item(0).text(), "09:00 开发")
+        self.assertEqual(page.project_card.title.text(), "今日项目动态  (1)")
+
+        page.render_agent_activity([(0, "codex", self.agent, True, "检测到运行进程 · PID 1234")])
+        self.assertEqual(page.metrics[2].value.text(), "1 / 1")
+        self.assertIn("运行中", page.agent_items.item(0).text())
+
+        self.store.save_evidence("project-used:" + self.project["project_id"], {"at": "2026-10-11T09:00:00+08:00"})
+        self.store.save_evidence("agent-used:" + self.agent.id, {"at": "2026-10-11T10:00:00+08:00"})
+        page.render_recent()
+        self.assertEqual(len(page.recent_buttons), 2)
+        next(button for button in page.recent_buttons if button.text().startswith(self.agent.name)).click()
+        self.assertEqual(self.window.navigation.currentRow(), self.window.AGENT)
+        self.assertEqual(self.window.agent_page.selected().id, self.agent.id)
 
     def test_future_entry_date_navigation_and_completion_preserve_today(self):
         page = self.window.today_page
@@ -530,8 +616,7 @@ class WorkbenchUITests(unittest.TestCase):
         self.until(lambda: page.report and page.report["day"] == future.isoformat())
         self.assertEqual(self.daily.load()["text"], original)
         self.assertIn("当日", page.task_card.title.text())
-        page.check_day()
-        self.until(lambda: not page.worker)
+        self.assertEqual(page.date_picker.date().toPython(), future)
         self.assertEqual(page.day, future)
         page.tasks.item(0).setCheckState(Qt.CheckState.Checked)
         planned = Daily(self.daily.files.root, future)
@@ -553,20 +638,13 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(page.report["tasks"], [])
         self.assertFalse(Path(page.report["path"]).exists())
 
-    def test_midnight_follows_today_but_keeps_deliberately_selected_date(self):
+    def test_manual_refresh_keeps_deliberately_selected_date(self):
         page = self.window.today_page
-        yesterday = date.today() - timedelta(days=1)
-        page.actual_today = yesterday
-        page.set_day(yesterday)
-        self.until(lambda: page.report and page.report["day"] == yesterday.isoformat())
-        page.check_day()
-        self.until(lambda: page.report and page.report["day"] == date.today().isoformat())
         future = date.today() + timedelta(days=4)
         page.set_day(future)
         self.until(lambda: page.report and page.report["day"] == future.isoformat())
-        page.actual_today = yesterday
-        page.check_day()
-        self.until(lambda: not page.worker)
+        page.manual_refresh()
+        self.until(lambda: page.report and page.report["day"] == future.isoformat() and not page.worker)
         self.assertEqual(page.day, future)
 
     def test_agenda_selected_date_add_preserves_existing_plan_and_invalid_range_blocks_open(self):
@@ -640,8 +718,9 @@ class WorkbenchUITests(unittest.TestCase):
         page = self.window.today_page
         self.window.resize(960, 700)
         QTest.qWait(150)
-        self.assertEqual(page.columns_layout.getItemPosition(page.columns_layout.indexOf(page.columns[1]))[:2], (0, 1))
+        self.assertEqual(page.columns_layout.getItemPosition(page.columns_layout.indexOf(page.task_card))[:2], (0, 0))
+        self.assertEqual(page.columns_layout.getItemPosition(page.columns_layout.indexOf(page.top_side))[:2], (1, 0))
+        self.assertEqual(page.columns_layout.getItemPosition(page.columns_layout.indexOf(page.project_card))[:2], (2, 0))
         self.assertGreaterEqual(page.edit_button.width(), page.edit_button.minimumSizeHint().width())
-        self.assertGreaterEqual(page.focus_button.width(), page.focus_button.minimumSizeHint().width())
         self.assertTrue(page.task_card.isVisible())
         self.assertTrue(page.project_card.isVisible())

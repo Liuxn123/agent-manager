@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from .domain import UserError
-from .project_workspaces import ProjectWorkspace, MANAGEMENT_FILES, linked
+from .project_workspaces import ProjectWorkspace, MANAGEMENT_FILES, linked, lifecycle_state
 
 
 def open_uri(path: Path) -> str:
@@ -31,6 +31,13 @@ def project_uri(workspace: ProjectWorkspace, identity: str, relative: str) -> di
         entry = workspace.path(item["vault_entry"], allow_link=True)
         target = workspace.path(item["path"])
         if not linked(entry) or not entry.is_dir() or entry.resolve() != target.resolve():
+            try:
+                status_path = workspace.path(item["path"] + "/agent/STATUS.md")
+                archived = lifecycle_state(workspace.read(status_path)) == "archived"
+            except (OSError, UserError):
+                archived = False
+            if archived:
+                raise UserError("已归档项目已从 Obsidian 的 03-项目目录隐藏；取消归档后会自动恢复入口。")
             raise UserError("Obsidian 项目入口缺失或指向其他目录，请先核对入口；不会打开错误的项目。")
         vault = workspace.path("myself")
         require_vault(vault)
@@ -52,3 +59,41 @@ def index_uri(workspace: ProjectWorkspace, archived: bool = False) -> dict:
     if not path.is_file():
         raise UserError("项目索引不存在，请先刷新 Obsidian 索引。")
     return {"uri": open_uri(path), "path": str(path), "vault": str(vault)}
+
+
+def project_notes_uri(workspace: ProjectWorkspace, identity: str, vault_root: Path) -> dict:
+    """Resolve a project's notes folder inside the user-selected Obsidian vault."""
+    item = workspace.project(identity)
+    vault = Path(vault_root).expanduser().absolute()
+    require_vault(vault)
+    project = workspace.path(item["path"])
+    notes = workspace.path(item["path"] + "/笔记")
+
+    # Prefer a project path that is already inside the configured vault.
+    try:
+        relative_project = project.resolve().relative_to(vault.resolve())
+        target = vault / relative_project / "笔记"
+    except ValueError:
+        target = None
+
+    # Registered Obsidian entries are junctions from the vault into the project tree.
+    if target is None and item.get("vault_entry"):
+        entry_parts = Path(item["vault_entry"]).parts
+        if len(entry_parts) < 2 or entry_parts[0] != "myself":
+            raise UserError("项目登记中的 Obsidian 入口无效。")
+        target = vault.joinpath(*entry_parts[1:], "笔记")
+
+    if target is not None and not target.exists() and item.get("vault_entry"):
+        try:
+            status_path = workspace.path(item["path"] + "/agent/STATUS.md")
+            archived = lifecycle_state(workspace.read(status_path)) == "archived"
+        except (OSError, UserError):
+            archived = False
+        if archived:
+            raise UserError("已归档项目已从 Obsidian 的 03-项目目录隐藏；取消归档后会自动恢复入口。")
+
+    if target is None:
+        raise UserError("当前项目不在设置的 Obsidian 知识库中，也没有登记 Obsidian 入口。请在设置中选择包含此项目的知识库根目录。")
+    if (target.exists() and not target.is_dir()) or target.resolve() != notes.resolve():
+        raise UserError("设置的 Obsidian 知识库与当前项目入口不匹配。请检查知识库根目录和项目登记；不会打开其他目录。")
+    return {"uri": open_uri(target), "path": str(target), "vault": str(vault)}

@@ -14,6 +14,7 @@ from agent_manager.project_workspaces import ProjectWorkspace
 from agent_manager.workbench import (Daily, Catalog, MarkdownFiles, work_root, migrate_workbench,
     project_context, set_project_details, append_stage, summaries, stage_template, markdown_uri)
 from agent_manager.workbench import task_details, Agenda
+from agent_manager.planbook import PlanBook, occurs_on
 
 
 class WorkbenchTests(unittest.TestCase):
@@ -125,6 +126,50 @@ class WorkbenchTests(unittest.TestCase):
             self.skipTest("Symbolic link creation unavailable")
         with self.assertRaises(UserError):
             Agenda(self.root).scan()
+
+    def test_plan_book_uses_markdown_compare_and_swap_and_preserves_custom_fields(self):
+        root = self.root / "plans"
+        book = PlanBook(root)
+        self.assertEqual(book.scan()["items"], [])
+        self.assertFalse(root.exists())
+        values = {"title": "年度目标", "status": "active", "start": "2026-01-01",
+                  "due": "2026-12-31", "project_id": "P-2026-010", "progress": 70}
+        book.save("goal", values, "## 目标\n\n完成首期版本。\n")
+        item = book.scan("goal")["items"][0]
+        self.assertEqual(item["metadata"]["progress"], 70)
+        self.assertEqual(item["metadata"]["project_id"], "P-2026-010")
+        with self.assertRaises(UserError):
+            book.save("goal", values, "重复目标")
+        from agent_manager.workbench import frontmatter, render_document
+        metadata, body = frontmatter(item["text"])
+        metadata["custom"] = "保留用户字段"
+        changed = render_document(metadata, body)
+        book.files.write(item["relative"], changed, item["text"])
+        item = book.scan("goal")["items"][0]
+        book.save("goal", {**values, "title": "年度目标更新"}, item["body"], item)
+        updated = book.scan("goal")["items"][0]
+        self.assertEqual(updated["id"], item["id"])
+        self.assertEqual(updated["metadata"]["custom"], "保留用户字段")
+        external = updated["text"] + "\nObsidian 外部编辑\n"
+        Path(updated["path"]).write_text(external, encoding="utf-8")
+        with self.assertRaises(UserError):
+            book.save("goal", values, "不覆盖外部编辑", updated)
+        self.assertEqual(Path(updated["path"]).read_text(encoding="utf-8"), external)
+
+    def test_recurring_plan_projects_daily_weekly_and_month_end_dates_without_writes(self):
+        daily = {"type": "recurring", "metadata": {"status": "planned", "frequency": "daily",
+                 "start": "2026-10-10", "due": "2026-10-12"}}
+        self.assertTrue(occurs_on(daily, date(2026, 10, 11)))
+        self.assertFalse(occurs_on(daily, date(2026, 10, 13)))
+        weekly = {"type": "recurring", "metadata": {"status": "active", "frequency": "weekly",
+                  "start": "2026-10-05"}}
+        self.assertTrue(occurs_on(weekly, date(2026, 10, 12)))
+        self.assertFalse(occurs_on(weekly, date(2026, 10, 13)))
+        monthly = {"type": "recurring", "metadata": {"status": "planned", "frequency": "monthly",
+                   "start": "2026-01-31"}}
+        self.assertTrue(occurs_on(monthly, date(2026, 2, 28)))
+        self.assertTrue(occurs_on(monthly, date(2026, 3, 31)))
+        self.assertFalse(occurs_on(monthly, date(2026, 3, 30)))
 
     def test_windows_busy_read_handle_retries_without_losing_markdown(self):
         daily = Daily(self.root)

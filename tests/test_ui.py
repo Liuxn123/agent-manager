@@ -50,7 +50,7 @@ class UITests(unittest.TestCase):
         from PySide6.QtGui import QRawFont
         self.assertTrue(QRawFont.fromFont(self.app.font()).supportsCharacter(ord("恢")))
         self.window.resize(960, 660)
-        for index in range(6):
+        for index in range(self.window.navigation.count()):
             self.window.navigation.setCurrentRow(index)
             self.app.processEvents()
             self.assertEqual(self.window.stack.currentIndex(), index)

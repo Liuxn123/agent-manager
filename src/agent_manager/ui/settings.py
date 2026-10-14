@@ -1,12 +1,15 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QFrame, QFormLayout, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QScrollArea, QSpinBox, QTextEdit, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QFrame, QFormLayout, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QScrollArea, QSpinBox, QTextEdit, QToolButton, QVBoxLayout, QWidget, QApplication)
+
+from .components import nav_icon
 
 
 def build_settings(window):
     from .window import button
+    from .theme import apply_theme
     from ..workbench import work_root
 
     page = QWidget()
@@ -28,7 +31,9 @@ def build_settings(window):
         outer.setContentsMargins(18, 15, 18, 16)
         outer.setSpacing(12)
         header = QHBoxLayout()
-        badge = QLabel(icon)
+        badge = QLabel()
+        icon_index = {"☼": 7, "▱": 3, "◇": 3, "▤": 5, "▣": 12, "⚙": 7, "✓": 12, "i": 11}
+        badge.setPixmap(nav_icon(icon_index.get(icon, 7), "#2563eb").pixmap(24, 24))
         badge.setObjectName("SettingsIcon")
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setFixedSize(48, 48)
@@ -58,8 +63,26 @@ def build_settings(window):
     left_layout.setContentsMargins(0, 0, 0, 0)
     left_layout.setSpacing(12)
 
-    markdown_card, markdown = card("今日计划与资源 Markdown 目录",
-        "每日计划、Prompt、Skill 和资源说明保存在这里，可与 Obsidian 共用同一目录。", "▱")
+    appearance_card, appearance = card("外观", "选择更适合当前环境的显示主题。设置会保存在本机。", "☼")
+    appearance_row = QHBoxLayout()
+    appearance_row.addWidget(QLabel("界面主题"))
+    window.appearance_mode = QComboBox()
+    window.appearance_mode.addItem("浅色", "light")
+    window.appearance_mode.addItem("深色", "dark")
+    current_appearance = window.store.setting("appearance", "light")
+    window.appearance_mode.setCurrentIndex(max(0, window.appearance_mode.findData(current_appearance)))
+    def change_appearance(index):
+        mode = window.appearance_mode.itemData(index)
+        if mode in {"light", "dark"}:
+            window.store.set_setting("appearance", mode)
+            apply_theme(QApplication.instance(), mode)
+    window.appearance_mode.currentIndexChanged.connect(change_appearance)
+    appearance_row.addWidget(window.appearance_mode, 1)
+    appearance.addLayout(appearance_row)
+    left_layout.addWidget(appearance_card)
+
+    markdown_card, markdown = card("工作台计划与兼容资源 Markdown 目录",
+        "每日计划与旧 Prompt、Skill 等资源记录保存在这里。新知识库直接浏览下面设置的 Obsidian Vault。", "▱")
     path_row = QHBoxLayout()
     path_row.addWidget(QLabel("当前目录"))
     window.workbench_location = QLineEdit(str(work_root(window.store)))
@@ -71,6 +94,27 @@ def build_settings(window):
     path_hint.setObjectName("Subtitle")
     markdown.addWidget(path_hint)
     left_layout.addWidget(markdown_card)
+
+    obsidian_card, obsidian = card("知识库与 Obsidian Vault",
+        "知识库浏览 Vault 中的真实文件和目录；SQLite 仅保存标签、收藏和关联索引。项目笔记仍通过 Obsidian 打开。", "▱")
+    obsidian_row = QHBoxLayout()
+    obsidian_row.addWidget(QLabel("知识库根目录"))
+    from ..knowledge import knowledge_root
+    default_vault = knowledge_root(window.store)
+    window.obsidian_vault_root = QLineEdit(str(window.store.setting("obsidian_vault_root", "") or default_vault or ""))
+    window.obsidian_vault_root.setPlaceholderText("例如 E:\\obsidian\\myself")
+    obsidian_row.addWidget(window.obsidian_vault_root, 1)
+    obsidian_row.addWidget(button("浏览…", window.change_obsidian_vault_root))
+    obsidian.addLayout(obsidian_row)
+    obsidian_actions = QHBoxLayout()
+    obsidian_actions.addWidget(button("保存 Obsidian 路径", window.save_obsidian_vault_root, True))
+    obsidian_actions.addStretch(1)
+    obsidian.addLayout(obsidian_actions)
+    window.settings_obsidian_status = QLabel()
+    window.settings_obsidian_status.setObjectName("Subtitle")
+    window.settings_obsidian_status.setWordWrap(True)
+    obsidian.addWidget(window.settings_obsidian_status)
+    left_layout.addWidget(obsidian_card)
 
     backup_card, backup = card("备份目录",
         "保存 Agent 与 myself 的备份文件。使用 U 盘时，通常保留默认位置即可。", "▤")
@@ -106,6 +150,19 @@ def build_settings(window):
     password_actions.addStretch(1)
     password.addLayout(password_actions)
     left_layout.addWidget(password_card)
+
+    git_card, git_content = card("Git HTTPS 访问令牌",
+        "用于 GitHub / GitLab 等 HTTPS 仓库的拉取和推送。令牌保存在系统凭据库；便携模式保存在加密口令库。SSH 仓库继续使用本机 SSH 密钥或 ssh-agent。", "▣")
+    window.git_token_status = QLabel()
+    window.git_token_status.setWordWrap(True)
+    window.git_token_status.setObjectName("Subtitle")
+    git_content.addWidget(window.git_token_status)
+    git_actions = QHBoxLayout()
+    git_actions.addWidget(button("设置 / 更换令牌", window.set_git_token, True))
+    git_actions.addWidget(button("移除已保存令牌", window.remove_git_token))
+    git_actions.addStretch(1)
+    git_content.addLayout(git_actions)
+    left_layout.addWidget(git_card)
 
     options_card, options = card("可选设置与维护",
         "自动备份保留数量和电脑维护工具放在这里，不影响日常工作。", "⚙")
@@ -179,11 +236,22 @@ def build_settings(window):
         window.settings_backup_status.setText("备份目录\n" + backup_state + "\n" + str(backup_root))
         has_password = bool(window.service.common_password)
         window.settings_password_status.setText("备份密码\n" + ("本次已输入" if has_password else "尚未输入；首次备份时可设置"))
+        obsidian_root = Path(window.obsidian_vault_root.text().strip().strip('"')).expanduser() if window.obsidian_vault_root.text().strip() else None
+        if not obsidian_root:
+            obsidian_state = "尚未设置"
+        elif obsidian_root.is_dir() and (obsidian_root / ".obsidian").is_dir():
+            obsidian_state = "已连接"
+        else:
+            obsidian_state = "目录需要检查"
+        window.settings_obsidian_status.setText("Obsidian 知识库\n" + obsidian_state +
+                                                ("\n" + str(obsidian_root) if obsidian_root else ""))
 
     window.settings_status_update = update_status
     window.workbench_location.textChanged.connect(update_status)
     window.backup_path.textChanged.connect(update_status)
+    window.obsidian_vault_root.textChanged.connect(update_status)
     window.backup_location.setText(str(window.service.backup_root()))
     window.refresh_common_password()
+    window.refresh_git_token_status()
     update_status()
     window.stack.addWidget(page)
