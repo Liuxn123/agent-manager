@@ -44,7 +44,6 @@ QListWidget#Navigation::item { padding: 10px 12px; margin: 3px 0px; border-radiu
 QListWidget#Navigation::item:selected { background: #dcecff; color: #176be2; font-weight: 650; }
 QListWidget#Navigation::item:hover { background: #e8f2fd; }
 QWidget#GlobalTopbar { background: #f8fbff; border-bottom: 1px solid #e5edf7; }
-QLineEdit#GlobalSearch { min-height: 18px; background: #eef4fb; border: 1px solid #e4ecf6; border-radius: 16px; padding: 7px 12px; }
 QLabel#GlobalTopbarMeta { color: #697b94; font-size: 12px; }
 QPushButton#TopbarIconButton { border: none; background: transparent; color: #536680; font-size: 18px; padding: 4px 8px; }
 QPushButton#TopbarIconButton:hover { background: #e8f2fd; }
@@ -233,24 +232,6 @@ QTextBrowser#ProjectMarkdownPreview { border: 1px solid #e7ecf5; border-radius: 
 QListWidget#ProjectNotesList { background: #ffffff; border: 1px solid #e7ecf5; border-radius: 10px; padding: 6px; }
 QListWidget#ProjectNotesList::item { padding: 10px 11px; margin: 2px 0px; border: 1px solid transparent; border-radius: 7px; color: #405575; }
 QListWidget#ProjectNotesList::item:selected { background: #edf4ff; border-color: #b8d0ff; color: #1f5fbf; }
-QWidget#AgentPage { background: #f5f6fb; }
-QWidget#AgentPage QLabel#Title { font-size: 28px; }
-QWidget#AgentPage QLabel#Subtitle { color: #73829d; }
-QWidget#AgentPage QFrame#AgentHero { background: #ffffff; border: 1px solid #e7ecf5; border-radius: 14px; }
-QWidget#AgentPage QLabel#AgentIcon { background: #eaf2ff; color: #3979ff; border-radius: 14px; font-size: 27px; font-weight: 700; }
-QWidget#AgentPage QLabel#AgentName { color: #162c53; font-size: 23px; font-weight: 700; }
-QWidget#AgentPage QLabel#AgentMeta, QWidget#AgentPage QLabel#AgentPath { color: #71809e; }
-QWidget#AgentPage QLineEdit#AgentSearch { min-height: 28px; padding: 5px 10px; border: 1px solid #dfe6f1; border-radius: 8px; background: #ffffff; }
-QWidget#AgentPage QListWidget#AgentListing { border: none; background: transparent; padding: 2px; }
-QWidget#AgentPage QListWidget#AgentListing::item { padding: 8px 10px; border: 1px solid #e8edf5; border-radius: 10px; color: #23395f; background: #ffffff; }
-QWidget#AgentPage QListWidget#AgentListing::item:selected { background: #edf4ff; border-color: #8eb6ff; color: #173d83; }
-QWidget#AgentPage QFrame#AgentQuickPanel, QWidget#AgentPage QFrame#TodayCard { background: #ffffff; border: 1px solid #e7ecf5; border-radius: 13px; }
-QWidget#AgentPage QLabel#AgentBackupSummary, QWidget#AgentPage QLabel#AgentUsageSummary { color: #657793; font-size: 12px; }
-QWidget#AgentPage QListWidget#AgentCompactList { border: none; background: transparent; }
-QWidget#AgentPage QListWidget#AgentCompactList::item { padding: 7px 8px; border-bottom: 1px solid #eef1f6; }
-QWidget#AgentPage QSplitter#AgentWorkspace { background: transparent; }
-QWidget#AgentPage QSplitter#AgentWorkspace::handle { background: transparent; width: 9px; }
-QWidget#AgentPage QTabBar::tab { padding: 10px 15px; }
 QWidget#CatalogPage { background: #f5f6fb; }
 QWidget#KnowledgePage { background: #f5f6fb; }
 QWidget#KnowledgePage QSplitter::handle { background: #e9edf5; width: 5px; }
@@ -307,12 +288,17 @@ QLabel#CatalogDetailFacts { color: #607493; line-height: 1.5; }
 QTextBrowser#CatalogBodyPreview { background: transparent; border: none; padding: 4px 2px; color: #364d70; }
 QWidget#CatalogPage QLineEdit, QWidget#CatalogPage QComboBox { min-height: 22px; }
 QWidget#CatalogPage QPushButton { padding: 8px 12px; }
-QWidget#EnvironmentPage { background: #f5f6fb; }
-QWidget#EnvironmentPage QFrame#EnvironmentMetric { background: #ffffff; border: 1px solid #e7ecf5; border-radius: 12px; }
-QWidget#EnvironmentPage QTableWidget { background: #ffffff; border: 1px solid #e7ecf5; border-radius: 10px; gridline-color: #edf0f6; }
-QWidget#EnvironmentPage QHeaderView::section { background: #f7f9fc; border: none; border-bottom: 1px solid #e7ecf5; padding: 8px; color: #607493; }
 QWidget#SafetyPage { background: #f5f6fb; }
 QWidget#SafetyPage QLabel#Title { font-size: 25px; }
+QWidget#SafetyPage QFrame#SafetyAttention { background: #fff5e7; border: 1px solid #f0dfc0; border-radius: 10px; }
+QWidget#SafetyPage QLabel#SafetyAttentionIcon { background: #ffecd1; color: #a9660d; border-radius: 15px; font-size: 16px; font-weight: 700; }
+QWidget#SafetyPage QLabel#SafetyEmpty { background: #ffffff; border: 1px dashed #d7e3f5; border-radius: 10px; padding: 18px; color: #607493; }
+QWidget#SafetyPage QTableWidget#SafetyResourcesTable { border: none; border-top: 1px solid #e3e7ee; background: transparent; alternate-background-color: #f8faff; }
+QWidget#SafetyPage QTableWidget#SafetyResourcesTable::item { padding: 7px 6px; }
+QWidget#SafetyPage QListWidget#SafetyVersionList { background: #ffffff; border: 1px solid #e3e7ee; border-radius: 10px; padding: 5px; }
+QWidget#SafetyPage QListWidget#SafetyVersionList::item { padding: 11px 10px; border-bottom: 1px solid #edf1f8; }
+QWidget#SafetyPage QListWidget#SafetyVersionList::item:selected { background: #edf3ff; color: #2157c5; border-radius: 6px; }
+QWidget#SafetyPage QPushButton#TextButton { background: transparent; border: none; color: #2157c5; }
 QWidget#SafetyPage QFrame#SafetyControlCard { background: #ffffff; border: 1px solid #e6ecf5; border-radius: 12px; }
 QWidget#SafetyPage QFrame#SafetyMetric { background: #ffffff; border: 1px solid #e6ecf5; border-radius: 12px; }
 QWidget#SafetyPage QLabel#SafetyMetricValue { color: #17305c; font-size: 18px; font-weight: 700; }

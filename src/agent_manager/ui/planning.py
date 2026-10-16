@@ -429,14 +429,6 @@ class PlanEntryDialog(QDialog):
 
         self.heading = heading_text.itemAt(0).widget()
         self.description = description
-        self.kind_selector = QComboBox()
-        self.kind_selector.setObjectName("PlanEntryKind")
-        self.kind_selector.addItem("长期任务", "plan")
-        self.kind_selector.addItem("周期任务", "recurring")
-        self.kind_selector.setCurrentIndex(max(0, self.kind_selector.findData(self.kind)))
-        self.kind_selector.setEnabled(item is None)
-        layout.addLayout(self._field_row("任务类型", self.kind_selector))
-        self.kind_selector.currentIndexChanged.connect(self.update_plan_kind)
         self.summary_period = None
 
         self.title = QLineEdit(str(metadata.get("title", "")))
@@ -477,12 +469,14 @@ class PlanEntryDialog(QDialog):
         date_layout.addWidget(self.date_hint)
 
         recurrence_row = QWidget()
+        recurrence_row.setObjectName("PlanEntryRecurrenceRow")
         recurrence_layout = QHBoxLayout(recurrence_row)
         recurrence_layout.setContentsMargins(0, 0, 0, 0)
         recurrence_label = QLabel("重复周期")
         recurrence_label.setObjectName("PlanEntryFieldLabel")
         recurrence_layout.addWidget(recurrence_label)
         self.frequency_label = recurrence_label
+        self.recurrence_row = recurrence_row
         self.frequency = QComboBox()
         self.frequency.setObjectName("PlanEntryFrequency")
         self.frequency.addItem("每天", "daily")
@@ -554,9 +548,8 @@ class PlanEntryDialog(QDialog):
         self.update_plan_kind()
 
     def update_plan_kind(self, *_):
-        if not hasattr(self, "kind_selector"):
+        if not hasattr(self, "frequency"):
             return
-        self.kind = self.kind_selector.currentData()
         recurring = self.kind == "recurring"
         self.setWindowTitle(("编辑" if self.item else "新增") + KINDS[self.kind])
         if hasattr(self, "heading"):
@@ -570,7 +563,7 @@ class PlanEntryDialog(QDialog):
             "ⓘ  任务从开始日期起按所选周期重复；每周可勾选一个或多个星期，截止日期可选。"
             if recurring else "ⓘ  截止日期必填；开始日期可选。输入 YYYY-MM-DD 或点日历选择。")
         self.frequency_label.setVisible(recurring)
-        self.frequency.setVisible(recurring)
+        self.recurrence_row.setVisible(recurring)
         self.weekdays_panel.setVisible(
             recurring and self.frequency.currentData() == "weekly")
 
@@ -715,7 +708,14 @@ class PlanRecordsPanel(MarkdownPage):
         self.search.textChanged.connect(self.render)
         toolbar.addWidget(self.search, 1)
         toolbar.addWidget(control("刷新", self.refresh))
-        toolbar.addWidget(control("＋ 新建计划", self.create_item, True))
+        create_plan = control("＋ 新建计划", lambda _checked=False: self.create_item("plan"), True)
+        create_plan.setObjectName("PlanCreateLongTermButton")
+        create_plan.setToolTip("创建有截止日期的长期计划")
+        toolbar.addWidget(create_plan)
+        create_recurring = control("↻ 新建周期计划", lambda _checked=False: self.create_item("recurring"))
+        create_recurring.setObjectName("PlanCreateRecurringButton")
+        create_recurring.setToolTip("创建按每天或每周重复的周期计划")
+        toolbar.addWidget(create_recurring)
         layout.addLayout(toolbar)
 
         split = QSplitter(Qt.Orientation.Horizontal)
@@ -1003,12 +1003,15 @@ class PlanRecordsPanel(MarkdownPage):
         self.target_day.setVisible(item["type"] == "template")
         self.apply_button.setVisible(item["type"] == "template")
 
-    def create_item(self):
-        self.edit_item(None, "plan")
+    def create_item(self, kind="plan"):
+        self._open_item_editor(None, kind)
 
     def edit_item(self, item=None, kind=None):
         item = item or self.selected()
         kind = item["type"] if item else (kind or "plan")
+        self._open_item_editor(item, kind)
+
+    def _open_item_editor(self, item, kind):
         dialog = PlanEntryDialog(self, kind, item)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -1387,6 +1390,20 @@ class PlanningDashboard(QWidget):
                     widget.setParent(None)
                     widget.deleteLater()
         day_rows = [entry for entry in rows if entry["day"] == self.anchor.isoformat()]
+        current_task_ids = {entry.get("planned_task_id") for entry in day_rows if entry.get("planned_task_id")}
+        # Keep overdue unified tasks visible in the selected day's plan without
+        # changing their stored due date or creating another task record.
+        for task in self.page.window.store.planned_tasks(limit=5000):
+            due = task.get("due_date") or ""
+            if (task.get("kind") != "task" or task.get("status") == "done"
+                    or not due or due >= self.anchor.isoformat()
+                    or task.get("id") in current_task_ids):
+                continue
+            day_rows.append({"kind": "遗留任务", "title": task["title"], "done": False,
+                             "priority": task.get("priority", ""), "day": self.anchor.isoformat(),
+                             "origin_day": due, "planned_task_id": task["id"],
+                             "project_id": task.get("project_id"), "source": task.get("source"),
+                             "notes": task.get("notes", "")})
         day_rows.sort(key=lambda entry: (entry["kind"], entry["title"].casefold()))
         weekdays = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
         self.day_label.setText(f"{self.anchor:%Y年%m月%d日} · {weekdays[self.anchor.weekday()]} · 共 {len(day_rows)} 项安排")
@@ -1400,7 +1417,7 @@ class PlanningDashboard(QWidget):
         for index, entry in enumerate(day_rows):
             time_text, title_text = self._display_time_title(entry)
             checkbox = QCheckBox()
-            can_toggle = entry["kind"] in {"任务", "日程"}
+            can_toggle = entry["kind"] in {"任务", "遗留任务", "日程"}
             checkbox.setEnabled(can_toggle)
             checkbox.setChecked(bool(entry["done"]))
             checkbox.setToolTip("勾选状态会保存到统一任务库。" if can_toggle and entry.get("planned_task_id") else
@@ -1418,6 +1435,8 @@ class PlanningDashboard(QWidget):
             kind_cell.setProperty("kind", entry["kind"])
             kind_cell.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.day_table.setCellWidget(index, 1, kind_cell)
+            if entry.get("origin_day"):
+                title_text = f"{title_text} · 原计划 {entry['origin_day']}"
             title_cell = QTableWidgetItem(title_text)
             title_cell.setToolTip(title_text)
             self.day_table.setItem(index, 2, title_cell)
@@ -1488,7 +1507,7 @@ class PlanningDashboard(QWidget):
         self.set_day()
 
     def toggle_day_item(self, entry, done):
-        if entry["kind"] not in {"任务", "日程"}:
+        if entry["kind"] not in {"任务", "遗留任务", "日程"}:
             return
         if entry.get("planned_task_id"):
             status = "done" if done else "planned"
@@ -1519,7 +1538,7 @@ class PlanningDashboard(QWidget):
                            lambda _: self.page.agenda.reload(), persist_result=False)
 
     def delete_day_item(self, entry):
-        if entry["kind"] not in {"任务", "日程"}:
+        if entry["kind"] not in {"任务", "遗留任务", "日程"}:
             return
         kind = "日程" if entry["kind"] == "日程" else "任务"
         answer = QMessageBox.question(

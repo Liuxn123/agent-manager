@@ -139,7 +139,8 @@ def organize(store: Store, backups: Path, repository: Path, context: TaskContext
             context.checkpoint()
             source = Path(metadata["archive"])
             evidence = store.evidence(str(source.resolve()))
-            if not re.fullmatch(r"[a-f0-9]{32}\.amb", source.name) or not _regular(source):
+            archive_name = source.name if source.name != "backup.amb" else str(metadata.get("id", "")) + ".amb"
+            if not re.fullmatch(r"[a-f0-9]{32}\.amb", archive_name) or not _regular(source):
                 skipped += 1
                 continue
             if (not evidence.get("verified_at") or evidence.get("kind") != "agent"
@@ -153,7 +154,7 @@ def organize(store: Store, backups: Path, repository: Path, context: TaskContext
                 skipped += 1
                 continue
             engine = ENGINES.get(evidence.get("engine"), "other")
-            relative = f"archives/{engine}/{resource.id}/{source.name}"
+            relative = f"archives/{engine}/{resource.id}/{archive_name}"
             destination = repository / relative
             if any(archives.is_link(path) for path in (destination, *destination.parents)):
                 raise UserError("仓库目标存在链接，已停止整理。")

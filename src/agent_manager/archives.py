@@ -10,7 +10,9 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import re
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Iterator
 from uuid import uuid4
@@ -30,6 +32,23 @@ CHUNK = 1024 * 1024
 MAX_SIZE = 50 * 1024**3
 MAX_FILES = 200_000
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", ".pytest_cache"}
+WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _resource_folder_name(resource: Resource) -> str:
+    readable = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", resource.name).strip(" ._")
+    readable = readable[:60].rstrip(" .")
+    if not readable or readable.split(".")[0].upper() in WINDOWS_RESERVED:
+        readable = "资料"
+    return f"{readable}_{resource.id[:8]}"
+
+
+def _version_folder_name(identity: str, created_at: str) -> str:
+    try:
+        stamp = datetime.fromisoformat(created_at).strftime("%Y%m%d-%H%M%S")
+    except (TypeError, ValueError):
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return f"{stamp}_{identity[:8]}"
 
 
 def key_for(password: str, salt: bytes) -> bytes:
@@ -114,8 +133,13 @@ def _create_single_archive(resource: Resource, destination: Path, password: str,
         raise UserError("备份目录必须位于被备份目录之外。")
     destination.mkdir(parents=True, exist_ok=True)
     identity = uuid4().hex
-    final = destination / f"{identity}.amb"
-    temporary = destination / f".{identity}.partial"
+    resource_root = destination / _resource_folder_name(resource)
+    resource_root.mkdir(parents=True, exist_ok=True)
+    staging = resource_root / f".{identity}.partial"
+    version_dir = resource_root / _version_folder_name(identity, now())
+    staging.mkdir()
+    final = staging / "backup.amb"
+    temporary = staging / ".backup.partial"
     records: list[dict] = []
     excluded: list[str] = []
     directories: list[str] = []
@@ -194,18 +218,28 @@ def _create_single_archive(resource: Resource, destination: Path, password: str,
         temporary.replace(final)
         metadata = {"id": identity, "resource_id": resource.id, "kind": resource.kind, "created_at": manifest["created_at"],
                     "file_count": len(records), "size": final.stat().st_size, "excluded_count": len(excluded), "encrypted": True}
-        final.with_suffix(".json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        (staging / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        version_dir = resource_root / _version_folder_name(identity, manifest["created_at"])
+        staging.replace(version_dir)
+        final = version_dir / "backup.amb"
         context.log(f"加密备份已完成：{len(records)} 个文件，排除 {len(excluded)} 项。")
         return {**metadata, "archive": str(final), "excluded": excluded[:100], "verified": False}
     finally:
         temporary.unlink(missing_ok=True)
+        if staging.exists():
+            shutil.rmtree(staging)
 
 
 def _create_bundle(resource: Resource, components: list[dict], destination: Path, password: str, context: TaskContext) -> dict:
     """Stream several trees into one authenticated archive, without clear staging."""
     destination.mkdir(parents=True, exist_ok=True)
     identity = uuid4().hex
-    final, temporary = destination / f"{identity}.amb", destination / f".{identity}.partial"
+    resource_root = destination / _resource_folder_name(resource)
+    resource_root.mkdir(parents=True, exist_ok=True)
+    staging = resource_root / f".{identity}.partial"
+    version_dir = resource_root / _version_folder_name(identity, now())
+    staging.mkdir()
+    final, temporary = staging / "backup.amb", staging / ".backup.partial"
     records, directories, excluded = [], [], []
     total = 0
     skip = SKIP_DIRS | {"tmp", "cache", "Cache", "Caches", "GPUCache", "Code Cache", "logs", "worktrees"} | set(resource.options.get("exclude_dirs", []))
@@ -282,13 +316,18 @@ def _create_bundle(resource: Resource, components: list[dict], destination: Path
         metadata = {"id": identity, "resource_id": resource.id, "kind": resource.kind, "resource_name": resource.name,
                     "engine": manifest["engine"], "components": [item["label"] for item in components], "created_at": manifest["created_at"],
                     "file_count": len(records), "size": final.stat().st_size, "excluded_count": len(excluded), "encrypted": True}
-        final.with_suffix(".json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-        context.log("项目文件与本地记录已一起保存。复制此 .amb 文件和独立保存的口令即可换电脑恢复。")
+        (staging / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        version_dir = resource_root / _version_folder_name(identity, manifest["created_at"])
+        staging.replace(version_dir)
+        final = version_dir / "backup.amb"
+        context.log("项目文件与本地记录已一起保存。复制此版本文件夹和独立保存的口令即可换电脑恢复。")
         if codex:
             context.log("Codex 会话保存读取开始时已完成的 JSONL 记录，随后新增内容留待下次备份；最终迁移前请退出原应用再备份。运行锁和沙箱缓存已排除。")
         return {**metadata, "archive": str(final), "excluded": excluded[:100], "verified": False}
     finally:
         temporary.unlink(missing_ok=True)
+        if staging.exists():
+            shutil.rmtree(staging)
 
 
 @contextmanager
@@ -501,11 +540,21 @@ def list_archives(root: Path, resource_id: str) -> list[dict]:
     if not root.is_dir():
         return []
     result = []
-    for source in root.glob("*.amb"):
-        if source.is_symlink():
+    root = root.resolve()
+    for source in root.rglob("*.amb"):
+        if any(part.startswith(".") for part in source.relative_to(root).parts[:-1]):
             continue
-        sidecar = source.with_suffix(".json")
+        if is_link(source) or any(is_link(parent) for parent in source.parents if parent != root and root in parent.parents):
+            continue
         try:
+            if not source.resolve().is_relative_to(root):
+                continue
+        except (OSError, ValueError):
+            continue
+        sidecar = source.parent / "metadata.json" if source.name == "backup.amb" else source.with_suffix(".json")
+        try:
+            if is_link(sidecar) or not sidecar.resolve().is_relative_to(root):
+                continue
             if sidecar.stat().st_size > 20_000:
                 continue
             metadata = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -514,3 +563,41 @@ def list_archives(root: Path, resource_id: str) -> list[dict]:
         except (OSError, ValueError):
             continue
     return sorted(result, key=lambda item: item.get("created_at", ""), reverse=True)
+
+
+def delete_archive_version(root: Path, resource_id: str, archive_path: Path) -> None:
+    """Delete one listed version and its sidecar, without removing unknown files."""
+    root = root.expanduser().resolve()
+    source = archive_path.expanduser()
+    try:
+        resolved = source.resolve(strict=True)
+        if not resolved.is_relative_to(root) or is_link(source) or not source.is_file():
+            raise UserError("备份版本路径无效，未删除文件。")
+        current = source
+        while current != root:
+            if is_link(current):
+                raise UserError("备份目录包含链接，已停止删除。")
+            current = current.parent
+            if not current.is_relative_to(root) and current != root:
+                raise UserError("备份版本不在统一备份位置内，未删除文件。")
+        listed = next((item for item in list_archives(root, resource_id)
+                       if Path(item["archive"]).resolve() == resolved), None)
+        if not listed:
+            raise UserError("备份版本已不存在，或不属于当前资料，未删除文件。")
+        sidecar = source.parent / "metadata.json" if source.name == "backup.amb" else source.with_suffix(".json")
+        if is_link(sidecar) or not sidecar.is_file() or not sidecar.resolve().is_relative_to(root):
+            raise UserError("备份版本元数据无效，未删除文件。")
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict) or metadata.get("resource_id") != resource_id or metadata.get("id") != listed.get("id"):
+            raise UserError("备份版本归属校验失败，未删除文件。")
+        source.unlink()
+        sidecar.unlink()
+        if source.name == "backup.amb":
+            try:
+                source.parent.rmdir()
+            except OSError:
+                pass
+    except UserError:
+        raise
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise UserError("删除备份版本失败，请检查文件权限和目录状态。") from exc

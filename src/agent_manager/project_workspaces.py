@@ -17,11 +17,14 @@ from urllib.parse import quote
 
 from .domain import Cancelled, UserError
 from .runtime import TaskContext
+from .project_prompts import AGENT_WORKFLOW, prompt_document
+from .project_initialization import validate_selection, initialization_files
+from .project_skill_copies import prepare_skill_copies, copy_project_skills
 
 STATES = {"candidate": "待开展", "active": "进行中", "paused": "暂停", "completed": "已完成", "archived": "已归档"}
 MANAGEMENT_FILES = ("README.md", "AGENTS.md", "agent/README.md", "agent/STATUS.md", "agent/TASKS.md",
-                    "agent/TASKS-AI.md", "agent/TASKS-MANUAL.md", "agent/HANDOFF.md", "agent/MILESTONES.md")
-OPTIONAL_MANAGEMENT_FILES = {"agent/TASKS-AI.md", "agent/TASKS-MANUAL.md", "agent/MILESTONES.md"}
+                    "agent/TASKS-AI.md", "agent/TASKS-MANUAL.md", "agent/HANDOFF.md", "agent/MILESTONES.md", "agent/PROMPTS.md")
+OPTIONAL_MANAGEMENT_FILES = {"agent/TASKS-AI.md", "agent/TASKS-MANUAL.md", "agent/MILESTONES.md", "agent/PROMPTS.md"}
 
 
 def today() -> str:
@@ -835,7 +838,8 @@ class ProjectWorkspace:
             else:
                 path.unlink()
 
-    def create(self, name: str, goal: str, use_entry: bool, context: TaskContext, folder_name: str | None = None) -> dict:
+    def create(self, name: str, goal: str, use_entry: bool, context: TaskContext, folder_name: str | None = None,
+               initialization: dict | None = None) -> dict:
         if not name.strip() or len(name) > 80 or re.search(r'[<>:"/\\|?*\x00-\x1f]', name) or name.endswith((".", " ")) or name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *("COM" + str(i) for i in range(1,10)), *("LPT" + str(i) for i in range(1,10))}:
             raise UserError("请使用有效项目名称，不包含路径或文件名保留字符。")
         standardized_folder_name = folder_name is not None
@@ -845,6 +849,8 @@ class ProjectWorkspace:
                 raise UserError("请填写 1–60 个字符的英文目录名，只使用英文字母和数字。")
         if not goal.strip() or len(goal) > 2000:
             raise UserError("请填写项目目标（不超过 2000 个字符）。")
+        selection = validate_selection(initialization, check_sources=True)
+        skill_plans = prepare_skill_copies(selection["skills"], context)
         with self.lock("New"):
             observed = self.read(self.registry_path)
             data = self.registry()
@@ -870,19 +876,36 @@ class ProjectWorkspace:
             for candidate in (relative, "myself/03-项目/" + folder):
                 if self.path(candidate).exists():
                     raise UserError("项目或入口目标已存在。")
+            target = self.path(relative)
+            initialization_rules, extra_files = initialization_files(
+                selection, target, {"NAME": name, "ID": identity, "GOAL": goal, "DATE": today()})
             data["issued_ids"].append(identity)
             self.save_registry(data, observed)  # Reserve forever, even if following creation fails.
             observed = self.read(self.registry_path)
             target = self.path(relative)
             target.mkdir()
-            for filename in ("README.md", "STATUS.md", "TASKS.md", "HANDOFF.md", "MILESTONES.md", "AGENTS.md"):
+            for filename in ("README.md", "STATUS.md", "TASKS.md", "HANDOFF.md", "MILESTONES.md", "AGENTS.md", "PROMPTS.md"):
                 existing = self.path("agent/templates/" + filename)
                 text = self.read(existing) if existing.is_file() else default_template(filename)
+                if filename == "AGENTS.md" and "## AI 任务接续与动态汇报" not in text:
+                    text = text.rstrip() + "\n\n" + AGENT_WORKFLOW
+                if filename == "README.md" and "PROMPTS.md" not in text:
+                    text = text.rstrip() + "\n\nAI 首次初始化或接手时使用 [AI 提示词](PROMPTS.md)；每次实质任务按项目规则汇报并更新状态、任务与交接。\n"
                 for key, value in {"NAME": name, "DATE": today(), "ID": identity, "STATE": "active", "GOAL": goal, "PATH": str(target), "VAULT": str(self.root / entry) if entry else "无（只保留索引）", "WORKSPACE": str(self.root)}.items():
                     text = text.replace("{{" + key + "}}", value)
                 if not entry and filename in {"AGENTS.md", "HANDOFF.md", "MILESTONES.md"}:
                     text += "\n本次入口策略：仅索引；未建立 Obsidian 联接。\n"
+                if filename == "AGENTS.md":
+                    text += initialization_rules
+                if filename == "HANDOFF.md":
+                    text += ("\n- 初始化模板：" + selection["template"]["name"]
+                             + f"；Skills {len(selection['skills'])} 项复制到项目，知识资源 {len(selection['knowledge'])} 项保留引用。"
+                             + "选择见 `.xiaonian/config.json`；Agent 加载效果尚未验证。\n")
                 self.write(target / (filename if filename == "AGENTS.md" else "agent/" + filename), text)
+            for relative_file, content in extra_files.items():
+                context.checkpoint()
+                self.write(target / relative_file, content)
+            copy_project_skills(skill_plans, self, target, context)
             self.write(target / "README.md", f"# {name}\n\n编号：{identity}\n\n[接续入口](agent/README.md) · [状态](agent/STATUS.md) · [任务](agent/TASKS.md) · [日志与交接](agent/HANDOFF.md)\n")
             if entry:
                 self._link(entry, target)
@@ -1105,6 +1128,8 @@ class ProjectWorkspace:
         """Keep legacy callers from moving a project directory."""
         raise UserError("项目归档只切换 STATUS 状态，不支持移动目录。")
 def default_template(filename: str) -> str:
+    if filename == "PROMPTS.md":
+        return prompt_document()
     if filename == "AGENTS.md":
         return "# {{ID}} — {{NAME}} 项目规则\n\n- 当前完整目录：`{{PATH}}`。\n- Obsidian 入口：`{{VAULT}}`。\n- 先读 agent/README → STATUS → TASKS → HANDOFF 最近两条。\n- 项目之间隔离；保留原文与用户修改，不写凭据，不自动提交发布。\n- 状态以 STATUS 为准，任务以 TASKS 为准，日志追加 HANDOFF。\n"
     kinds = {"README.md": "project-agent-index", "STATUS.md": "project-status", "TASKS.md": "project-tasks", "HANDOFF.md": "project-handoff", "MILESTONES.md": "project-milestones"}

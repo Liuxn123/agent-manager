@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
 from PySide6.QtCore import QByteArray, Qt, QRect, QSize, QPoint, QTimer
 from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextDocument, QTextOption, QAbstractTextDocumentLayout, QPalette
@@ -139,10 +140,20 @@ PATHS = [
     '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
     '<path d="m13 2-9 12h7l-1 8 10-13h-7Z"/>',
     '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m12 12 9-9m-5 0h5v5"/>',
+    '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z"/>',
+    '<path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-5-5l4-4a4 4 0 0 1 5 0m2 2 1-1a4 4 0 0 1 5 5l-4 4a4 4 0 0 1-5 0"/>',
+    '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
+    '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',
 ]
 
 
 def nav_icon(index: int, color: str = "#818baf") -> QIcon:
+    # QIcon is implicitly shared; return a copy so callers cannot mutate the cache.
+    return QIcon(_nav_icon(index, color))
+
+
+@lru_cache(maxsize=256)
+def _nav_icon(index: int, color: str) -> QIcon:
     svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + PATHS[index] + '</g></svg>'
     pixmap = QPixmap(24, 24)
     pixmap.fill(Qt.GlobalColor.transparent)

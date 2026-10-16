@@ -17,3 +17,17 @@ auth.json
 *.key
 qa/
 docs/ui-preview-fluent/fixture/
+
+# Local UI/test workspaces and machine-specific outputs
+.project-ui-check-*/
+.safety-ui-check-*/
+delete-project-smoke-*/
+tmp*/
+data/
+backups/
+restored/
+portable.json
+*.log
+.local-secrets/
+.DS_Store
+Thumbs.db

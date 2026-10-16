@@ -116,8 +116,8 @@ def build_settings(window):
     obsidian.addWidget(window.settings_obsidian_status)
     left_layout.addWidget(obsidian_card)
 
-    backup_card, backup = card("备份目录",
-        "保存 Agent 与 myself 的备份文件。使用 U 盘时，通常保留默认位置即可。", "▤")
+    backup_card, backup = card("统一备份位置",
+        "文件夹、项目、Agent 等压缩加密备份统一保存到这里。可选择本机网盘客户端的同步目录；网盘同步由客户端负责。Hermes 原生仓库仍按其原生配置运行。", "▤")
     backup_row = QHBoxLayout()
     backup_row.addWidget(QLabel("当前目录"))
     window.backup_path = QLineEdit(str(window.service.backup_root()))
@@ -130,7 +130,7 @@ def build_settings(window):
     backup_actions.addWidget(button("保存备份目录", window.save_settings, True))
     backup_actions.addStretch(1)
     backup.addLayout(backup_actions)
-    backup_hint = QLabel("更改位置只影响之后创建的备份；旧备份不会自动搬移。")
+    backup_hint = QLabel("更改位置只影响之后创建的管家归档；旧备份不会自动搬移。请选择本机可写目录。")
     backup_hint.setObjectName("Subtitle")
     backup.addWidget(backup_hint)
     # Kept as a compatibility field for the existing save handler.
@@ -140,13 +140,24 @@ def build_settings(window):
     left_layout.addWidget(backup_card)
 
     password_card, password = card("统一备份密码",
-        "用于 Agent 与 myself 的加密 .amb 备份；关闭管家后会忘记本次输入。Hermes 原生备份仍使用自己的密钥。", "▣")
+        "用于 Agent 与 myself 的加密 .amb 备份，保存在系统凭据库；便携模式保存在已解锁的加密口令库。Hermes 原生备份仍使用自己的密钥。", "▣")
     window.common_password_status = QLabel()
     window.common_password_status.setWordWrap(True)
     password.addWidget(window.common_password_status)
+    password_view_row = QHBoxLayout()
+    window.common_password_view = QLineEdit()
+    window.common_password_view.setReadOnly(True)
+    window.common_password_view.setPlaceholderText("尚未保存统一备份口令")
+    window.common_password_view.setEchoMode(QLineEdit.EchoMode.Password)
+    password_view_row.addWidget(window.common_password_view, 1)
+    window.common_password_reveal = button("显示", lambda: None)
+    window.common_password_reveal.setCheckable(True)
+    window.common_password_reveal.toggled.connect(window.toggle_common_password_visibility)
+    password_view_row.addWidget(window.common_password_reveal)
+    password.addLayout(password_view_row)
     password_actions = QHBoxLayout()
     password_actions.addWidget(button("输入 / 更换密码", window.set_common_password, True))
-    password_actions.addWidget(button("忘记本次密码", window.forget_common_password))
+    password_actions.addWidget(button("移除已保存口令", window.forget_common_password))
     password_actions.addStretch(1)
     password.addLayout(password_actions)
     left_layout.addWidget(password_card)
@@ -235,7 +246,7 @@ def build_settings(window):
         backup_state = "正常" if backup_root.is_dir() else "首次备份时创建"
         window.settings_backup_status.setText("备份目录\n" + backup_state + "\n" + str(backup_root))
         has_password = bool(window.service.common_password)
-        window.settings_password_status.setText("备份密码\n" + ("本次已输入" if has_password else "尚未输入；首次备份时可设置"))
+        window.settings_password_status.setText("备份口令\n" + ("已保存" if has_password else "尚未保存；首次备份时可设置"))
         obsidian_root = Path(window.obsidian_vault_root.text().strip().strip('"')).expanduser() if window.obsidian_vault_root.text().strip() else None
         if not obsidian_root:
             obsidian_state = "尚未设置"

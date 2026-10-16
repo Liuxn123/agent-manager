@@ -4,6 +4,10 @@
 
 决策更新：Skills/MCP/提示词页面已按用户选择移除，技能下载、导入和分发交由 Skills Manager。Agent 管家保留原有便携目录数据，但不再维护第二套技能库。
 
+2026-10-15 新决策：Agent 页面改为 AI Agent 控制中心，并通过适配器能力展示具体操作。第一轮仅提供 Skills Manager 启动入口；用户随后明确授权获取 GitHub 源码并迁移部分功能。因此控制中心增加 Agent 原生目录发现，以及用户显式选择后的单项复制分配。不同于上游的 Tauri/Rust 客户端，本项目只移植路径映射和技能发现/分配思路，保持 PySide6 与现有资源/适配器结构；不迁移上游 UI、自动更新或链接分发。MIT 文本保存在 `licenses/skills-manager-MIT.txt`。
+
+Skills Manager 官方仓库 README 描述了集中技能库、按 Agent/项目划分工作区、保留 Agent 原生技能位置，以及通过复制或链接部署的工作流。其仓库采用 MIT License；本项目参考这些产品机制，没有复制代码。来源：[Skills Manager 中文说明](https://github.com/xingkongliang/skills-manager/blob/main/README.zh-CN.md)、[MIT License](https://github.com/xingkongliang/skills-manager/blob/main/LICENSE)。
+
 ## v0.5.0：Skills Manager 参考与本次取舍
 
 [Skills Manager 官方仓库](https://github.com/xingkongliang/skills-manager) 提供统一技能库、按 Agent 查看已有技能、自选目录、内容预览及复制/链接分发等能力。适合本项目借鉴的是“一个通用库，加各 Agent 实际文件清单”，可以独立接入现有 PySide6 页面和加密备份。

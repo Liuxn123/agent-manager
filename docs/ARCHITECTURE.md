@@ -1,5 +1,11 @@
 # Agent 管家 v0.8.3 架构
 
+## Agent 管理模块（暂缓）
+
+用户要求暂不实现 Agent 管理，因此已移除侧栏入口、工作台状态卡/轮询及专用管理界面。数据安全页仍通过现有备份服务保护已登记 Agent 资料；备份适配器与资源登记数据保留。
+
+Agent 管理及 Skills Manager 的应用内启动入口暂未提供。`agent_skills.py` 仍供项目初始化只读发现本机已有 Skills 使用。
+
 v0.8.3 数据安全首页增加统一的类型 / 登记项选择器、常用操作栏和健康状态卡，复用 `ResourcePage` 的登记、详情、目录及诊断控件，并仍将备份 / 恢复交给原 `ApplicationService` 与 Adapter。备份历史、换电脑恢复、操作记录和保护概览仍是原有独立子页；未更改归档格式、口令策略或 SQLite schema。
 
 v0.8.2 资源库页面重排为筛选 / 列表 / 详情三栏，筛选状态仍来自 `Catalog` 扫描的 Markdown frontmatter，不增加 SQLite 正文或索引字段；设置页以卡片展示资料目录、备份目录和密码状态，既有保存处理与数据路径保持不变。
@@ -26,7 +32,7 @@ v0.7.6 TodayPage 首页只保留 Todo 与当日任务。Todo 复用 Agenda 对�
 
 - `domain.py` 的 Resource 仍是备份 / Agent 登记模型，id 与 options 保持兼容。
 - `application.py` 统一调用 Adapter、资源 / 路径锁、备份、校验、恢复与演练。
-- `adapters/`：本地 Hermes、服务器 Hermes、项目、Vault、通用 Agent。服务器代码仍通过严格 SSH 执行受限操作。
+- `adapters/`：本地 Hermes、服务器 Hermes、项目、任意本地文件夹、用户脚本备份、Vault、通用 Agent。文件夹/脚本输出复用统一 `.amb` 归档、压缩加密和恢复服务；脚本输出由隔离临时目录收集。服务器代码仍通过严格 SSH 执行受限操作。
 - `archives.py` / `snapshots.py` / `security.py`：原 .amb schema 1、AES-GCM、SQLite / JSONL 快照、凭据策略与路径防护。
 - `project_workspaces.py`：projects.json schema 2，身份分配、管理锁、STATUS / TASKS / HANDOFF、笔记、索引；归档 / 重新启用优先通过 STATUS 生命周期字段处理。
 - `portable.py`：配置中程序目录内的路径编码成 @portable，引导 U 盘移动后的解码；外部路径保持外部路径。
@@ -68,14 +74,14 @@ v0.7.4 复用 Daily 按日期文件作为唯一真源。Agenda 是只读跨日�
 
 TodayPage 区分系统今日与当前浏览日期，跨午夜只推进原本停留在今天的视图；后台返回必须匹配日期与当前资料路径，避免快速切换日期后旧响应显示为新日期。添加 / 编辑捕获目标日期、路径与原文，写入仍走原 Worker。新增任意日期选择不改变 Markdown / SQLite / projects.json / .amb schema。
 
-项目详情逐份读取管理文档，错误作为可见状态返回，避免 TASKS 缺失造成 STATUS / HANDOFF 一并空白。文档错误控制依赖它的编辑操作。CatalogPage.set_scope 统一清除遗留筛选，新建资源沿用当前关联；Agent 备注写入同一 Markdown 后导航到结果。打开系统目录返回实际成功状态，失败不记录使用成功。源码启动脚本显式选用相邻便携安装的数据，不合并或自动迁移其他数据目录。
+项目详情逐份读取管理文档，错误作为可见状态返回，避免 TASKS 缺失造成 STATUS / HANDOFF 一并空白。文档错误控制依赖它的编辑操作。CatalogPage.set_scope 统一清除遗留筛选，新建资源沿用当前关联；资源备注写入同一 Markdown 后导航到结果。打开系统目录返回实际成功状态，失败不记录使用成功。源码启动脚本显式选用相邻便携安装的数据，不合并或自动迁移其他数据目录。
 
 
-一级堆栈仅六页，使用命名导航常量。`ui/workbench.py` 提供 TodayPage / CatalogPage / AgentPage；ProjectPage 扩展阶段概览、阶段总结、关联资料。
+一级堆栈为六页，使用命名导航常量。`ui/workbench.py` 提供 TodayPage / CatalogPage；ProjectPage 扩展阶段概览、阶段总结、关联资料。
 
 数据安全复用原 ResourcePage、备份历史 / 迁移、操作记录与保护概览。每日无备份主按钮。旧工作笔记从今日只读访问，原文件保留。
 
-进程状态在数据安全保护概览中按需后台读取，单轮清单供所有 Agent 使用；隐藏页面停止轮询。任务列表按需加载摘要，选中才读详情；项目文档标签复用已加载正文。
+任务列表按需加载摘要，选中才读详情；项目文档标签复用已加载正文。
 
 ## 增量迁移
 

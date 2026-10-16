@@ -71,5 +71,6 @@ def restored_resource(manifest: dict, target: Path, folders: dict[str, str]) -> 
             else:
                 options["record_paths"].append(path)
     # Restored data must never automatically launch programs from the old host.
-    return Resource.from_dict({"name": manifest.get("resource_name", "导入的资料"), "kind": manifest["kind"],
+    kind = "folder" if manifest["kind"] == "script" else manifest["kind"]
+    return Resource.from_dict({"name": manifest.get("resource_name", "导入的资料"), "kind": kind,
                                "id": manifest["resource_id"], "options": options})

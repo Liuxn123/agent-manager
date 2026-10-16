@@ -44,7 +44,11 @@ class ResourceDialog(QDialog):
         layout.addWidget(scroll)
         self.add_field("name", "名称", resource.name if resource else KINDS[kind])
         options = resource.options if resource else {}
-        if kind == "hermes_local":
+        if kind == "script":
+            self.add_field("script_path", "备份脚本", options.get("script_path", ""), "file")
+            self.add_field("script_arguments", "脚本参数 JSON 数组", json.dumps(options.get("script_arguments", []), ensure_ascii=False))
+            note = "启用自动备份后，脚本会按每日计划运行。运行时会获得 AGENT_MANAGER_BACKUP_OUTPUT_DIR 临时目录；请将要备份的内容写入该目录，管家随后压缩、加密并保存到设置中的统一备份位置。请勿把口令或访问令牌写入参数。"
+        elif kind == "hermes_local":
             self.add_field("home", "Hermes 运行目录", options.get("home", str(Path.home() / ".hermes")), "dir")
             self.add_field("backup_repo", "Hermes 备份仓库", options.get("backup_repo", ""), "dir")
             self.add_field("python", "工具 Python", options.get("python", self.default_python()), "file")
@@ -85,7 +89,7 @@ class ResourceDialog(QDialog):
             self.form.addRow("", reuse)
             note = "管理 Linux/systemd 服务器；使用 SSH Agent 或私钥，严格验证主机指纹。恢复只写入空目录，不自动启动网关。"
         else:
-            self.add_field("path", "项目文件夹（Agent 可不填）" if kind == "agent" else "项目文件夹", options.get("path", ""), "dir")
+            self.add_field("path", "项目文件夹（Agent 可不填）" if kind == "agent" else "文件夹位置" if kind == "folder" else "项目文件夹", options.get("path", ""), "dir")
             self.add_field("exclude_dirs", "额外排除目录名", ", ".join(options.get("exclude_dirs", [])))
             if kind == "vault":
                 self.manage_git = QCheckBox("独立管理知识库 Git（例如 myself）")
@@ -125,7 +129,7 @@ class ResourceDialog(QDialog):
                 self.form = saved_form
                 self.form.addRow(advanced)
                 self.resize(760, 680)
-            note = ("选项目文件夹，保存代码与成果；再添加本地记录目录，保存聊天、配置和附件。备份前退出对应 Agent。" + RECORD_NOTE) if kind == "agent" else "代码、笔记、附件及未提交文件会一起加密备份。换电脑时恢复到新文件夹。"
+            note = (("选项目文件夹，保存代码与成果；再添加本地记录目录，保存聊天、配置和附件。备份前退出对应 Agent。" + RECORD_NOTE) if kind == "agent" else "所选文件夹将压缩并加密保存到设置中的统一备份位置。" if kind == "folder" else "代码、笔记、附件及未提交文件会一起加密备份。换电脑时恢复到新文件夹。")
         if kind in {"agent", "hermes_local", "hermes_server"}:
             details = QGroupBox("日常入口与关联（可选）")
             details.setCheckable(True)
@@ -203,6 +207,15 @@ class ResourceDialog(QDialog):
                 if not isinstance(arguments, list) or not all(isinstance(item, str) for item in arguments):
                     raise UserError("启动参数需要字符串 JSON 数组。")
                 options["arguments"] = arguments
+            elif self.kind == "script":
+                script = Path(options.get("script_path", "")).expanduser()
+                if not script.is_file():
+                    raise UserError("请选择现有备份脚本。")
+                arguments = json.loads(values["script_arguments"])
+                if not isinstance(arguments, list) or not all(isinstance(item, str) for item in arguments):
+                    raise UserError("脚本参数需要字符串 JSON 数组。")
+                options["script_path"] = str(script.resolve())
+                options["script_arguments"] = arguments
             else:
                 if self.kind != "agent" and not options["path"]:
                     raise UserError("请选择资源目录。")
@@ -247,7 +260,7 @@ class PasswordDialog(QDialog):
         self.setWindowTitle("加密备份口令" if creating else "解锁备份")
         self.resize(480, 230)
         layout = QVBoxLayout(self)
-        hint = QLabel(("设置统一备份密码：所有新建的 Agent 和 myself 加密备份共用它。" if creating else "输入这份备份原来的密码；已经输入统一密码时，可以留空使用它。") + "请单独记住，换电脑时需要输入。关闭管家后会忘记本次输入的密码。")
+        hint = QLabel(("设置统一备份口令：所有新建的 Agent 和 myself 加密备份共用它，并保存到安全凭据存储。" if creating else "输入这份备份原来的口令；已经保存统一口令时，可以留空使用它。") + "换电脑恢复时仍需提供相同口令。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         form = QFormLayout()
@@ -260,7 +273,7 @@ class PasswordDialog(QDialog):
             form.addRow("再次输入", self.confirm)
         layout.addLayout(form)
         portable = bool(getattr(getattr(parent, "store", None), "portable_root", None))
-        self.remember = QCheckBox("本次打开期间作为统一备份密码")
+        self.remember = QCheckBox("保存为统一备份口令")
         self.remember.setChecked(creating)
         layout.addWidget(self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)

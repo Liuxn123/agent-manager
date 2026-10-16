@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRect, QPoint, QRectF
@@ -152,6 +153,33 @@ def milestone_rows(text):
                          "line_number": line_number, "status_column": status,
                          "status_editable": status is not None and status < len(cells)})
     return rows
+
+
+def milestone_snapshot(rows, today=None):
+    """Summarize milestone completion for project progress displays."""
+    today = today or date.today()
+    done_states = {"已完成", "完成", "completed", "complete", "done"}
+    active_states = {"进行中", "处理中", "in_progress", "active"}
+    overdue_states = {"逾期", "已逾期", "overdue", "late"}
+    done = active = overdue = 0
+    for row in rows:
+        status = str(row.get("status", "")).strip().casefold()
+        if status in done_states:
+            done += 1
+        elif status in active_states:
+            active += 1
+        elif status in overdue_states:
+            overdue += 1
+        else:
+            try:
+                due = date.fromisoformat(str(row.get("date", "")).strip())
+            except ValueError:
+                due = None
+            overdue += int(due is not None and due < today)
+    total = len(rows)
+    pending = max(0, total - done - active - overdue)
+    return {"total": total, "done": done, "in_progress": active, "pending": pending,
+            "overdue": overdue, "progress": round(done * 100 / total) if total else 0}
 
 
 class ProjectCardDelegate(TodayDelegate):
@@ -327,7 +355,7 @@ class ProjectOverview(QWidget):
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(9)
         root.addLayout(self.grid)
-        self.progress_card, self.progress_body = self.card("项目进度", 9)
+        self.progress_card, self.progress_body = self.card("里程碑进度", 9)
         self.milestones_card, self.milestones_body = self.card(
             "里程碑", 15, "查看全部 →", open_milestones, scrollable=True)
         self.info_card, self.info_body = self.card("项目信息", 4, "编辑", edit_info)
@@ -441,15 +469,17 @@ class ProjectOverview(QWidget):
     def set_data(self, snapshot, project, project_info, resources, agents, milestones=None, milestones_exists=False,
                  project_documents=None, milestones_text=""):
         checklist = snapshot["checklist"]
+        milestone_items = milestones or []
+        milestone_stats = milestone_snapshot(milestone_items)
         self.clear(self.progress_body)
-        progress = checklist["progress"]
+        progress = milestone_stats["progress"]
         summary = QHBoxLayout(); summary.setSpacing(10)
         summary.addWidget(self._progress_ring(progress), 0, Qt.AlignmentFlag.AlignVCenter)
         stats = QVBoxLayout(); stats.setSpacing(9)
-        for title, value, color in (("已完成", checklist["done"], "#14aa72"),
-                                    ("进行中", checklist["in_progress"], "#2879f6"),
-                                    ("待开始", checklist["pending"], "#8795ad"),
-                                    ("已逾期", checklist["overdue"], "#ed5361")):
+        for title, value, color in (("已完成", milestone_stats["done"], "#14aa72"),
+                                    ("进行中", milestone_stats["in_progress"], "#2879f6"),
+                                    ("待开始", milestone_stats["pending"], "#8795ad"),
+                                    ("已逾期", milestone_stats["overdue"], "#ed5361")):
             line = QHBoxLayout(); dot = QLabel("●"); dot.setStyleSheet(f"color:{color};")
             line.addWidget(dot); line.addWidget(label(title, "TodayMuted"), 1); line.addWidget(label(str(value), "PlanSummaryItem"))
             stats.addLayout(line)
@@ -457,7 +487,6 @@ class ProjectOverview(QWidget):
         self.progress_body.addLayout(summary)
 
         self.clear(self.milestones_body)
-        milestone_items = milestones or []
         if milestone_items:
             can_edit_milestones = project.get("state") not in {"archived", "unknown"}
             for index, item in enumerate(milestone_items):

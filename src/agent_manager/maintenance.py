@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,7 +27,7 @@ def fingerprint(path: Path) -> dict:
 
 
 def backup_health(store: Store, resource: Resource, backup_root: Path) -> dict:
-    if resource.kind in {"project", "vault", "agent"}:
+    if resource.kind in {"project", "folder", "script", "vault", "agent"}:
         candidates = archives.list_archives(backup_root, resource.id)
         if not candidates:
             return {"state": "未备份", "source": "", "created_at": None, "verified": False, "rehearsed": False}
@@ -73,6 +74,15 @@ def retention_candidates(root: Path, resource_id: str, keep: int, protected: str
     result = []
     for item in archives.list_archives(root, resource_id)[keep:]:
         source = Path(item["archive"])
-        if source.resolve().parent == root.resolve() and source.name != Path(protected).name and not source.is_symlink() and source.stem.isalnum():
-            result.append(source)
+        try:
+            resolved = source.resolve()
+            resolved_root = root.resolve()
+            if not resolved.is_relative_to(resolved_root) or archives.is_link(source):
+                continue
+            is_version = source.name == "backup.amb" and bool(re.fullmatch(r"\d{8}-\d{6}_[a-f0-9]{8}", source.parent.name))
+            is_legacy = source.parent.resolve() == resolved_root and bool(re.fullmatch(r"[a-f0-9]{32}\.amb", source.name))
+            if (is_version or is_legacy) and resolved != Path(protected).resolve():
+                result.append(source)
+        except (OSError, ValueError):
+            continue
     return result

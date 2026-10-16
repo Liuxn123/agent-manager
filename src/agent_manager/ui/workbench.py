@@ -6,23 +6,22 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher, QEvent, QUrl, QDate, QSize, QProcess, QRect, QFileInfo
 from PySide6.QtGui import QDesktopServices, QColor, QPainter, QFont, QIcon, QPixmap
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QApplication, QFrame,
-    QTextBrowser, QTextEdit, QSplitter, QListWidget, QListWidgetItem, QDialog,
-    QDialogButtonBox, QFormLayout, QLineEdit, QComboBox, QCheckBox, QScrollArea, QMessageBox,
-    QGridLayout, QDateEdit, QTabWidget, QSizePolicy, QFileDialog, QTabBar, QFileIconProvider,
-    QProgressBar, QStyledItemDelegate, QStyle, QToolButton, QMenu)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QTextBrowser,
+    QTextEdit, QSplitter, QListWidget, QListWidgetItem, QDialog, QDialogButtonBox,
+    QFormLayout, QLineEdit, QComboBox, QCheckBox, QScrollArea, QMessageBox,
+    QGridLayout, QDateEdit, QFileDialog, QTabBar, QFileIconProvider,
+    QProgressBar, QStyledItemDelegate, QStyle, QToolButton,
+)
 
 from ..domain import UserError
-from ..maintenance import backup_health
 from ..planbook import PlanBook, occurs_on
 from ..project_workspaces import ProjectWorkspace
 from ..runtime import TaskContext
-from ..storage import now
 from ..workbench import Daily, Catalog, TYPES, work_root, markdown_uri, project_context
 from .components import FlowLayout, nav_icon
 from .tasks import ReadWorker
-from .presentation import readable_time
-from .today_widgets import Metric, Section, TodayList, ROW_DATA, COLORS, link, label
+from .today_widgets import Metric, Section, TodayList, ROW_DATA, COLORS, label
 from .task_dialog import UnifiedTaskDialog
 
 
@@ -206,7 +205,6 @@ class TodayPage(MarkdownPage):
         self.follow_today = True
         self.loaded_once = False
         self.project_errors = []
-        self.agent_rows = []
         self.narrow = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 18)
@@ -250,9 +248,9 @@ class TodayPage(MarkdownPage):
         self.metric_grid = QGridLayout()
         self.metric_grid.setSpacing(12)
         self.metrics = [Metric(title, color, icon, hint) for title, color, icon, hint in zip(
-            ("今日任务", "进行中项目", "运行中的 Agent", "今日提醒"),
-            (COLORS[0], COLORS[3], "#22a66b", COLORS[2]), (9, 3, 4, 11),
-            ("完成进度", "查看下一步", "本机进程状态", "计划与到期事项"))]
+            ("今日任务", "进行中项目", "今日提醒"),
+            (COLORS[0], COLORS[3], COLORS[2]), (9, 3, 11),
+            ("完成进度", "查看下一步", "计划与到期事项"))]
         self.metrics[0].add_progress()
         for i, widget in enumerate(self.metrics):
             self.metric_grid.addWidget(widget, 0, i)
@@ -267,7 +265,6 @@ class TodayPage(MarkdownPage):
         self.columns_layout.setSpacing(14)
         self.columns_layout.setColumnStretch(0, 7)
         self.columns_layout.setColumnStretch(1, 5)
-
         self.task_card = Section("今日任务", 9)
         self.tasks = TodayList("task")
         self.tasks.itemChanged.connect(self.toggle_task)
@@ -306,12 +303,10 @@ class TodayPage(MarkdownPage):
             ("计划管理", "今日待办与周月总结", window.PLAN, "blue"),
             ("项目", "项目进展与资料", window.PROJECT, "purple"),
             ("知识库", "文件、链接、笔记与标签", window.LIBRARY, "green"),
-            ("Agent", "登记、Skills 与状态", window.AGENT, "purple"),
-            ("电脑与环境", "开发工具与环境变量", window.ENVIRONMENT, "blue"),
-            ("数据安全", "本机文件变更追踪", window.SAFETY, "green"),
+            ("数据安全", "资料备份、校验与恢复", window.SAFETY, "green"),
             ("设置", "外观与工作区偏好", window.SETTINGS, "purple"),
         )
-        module_icons = (8, 3, 6, 4, 2, 5, 7)
+        module_icons = (8, 3, 6, 5, 7)
         for index, (title, detail, page, color) in enumerate(self.module_specs):
             action_button = control(title + "\n" + detail,
                                     lambda _=False, target=page: window.navigation.setCurrentRow(target))
@@ -332,14 +327,6 @@ class TodayPage(MarkdownPage):
         self.continue_projects.itemDoubleClicked.connect(self.open_project)
         self.project_card.body.addWidget(self.continue_projects)
 
-        self.agent_card = Section("Agent 状态", 4, "管理 Agent →", lambda: window.navigation.setCurrentRow(window.AGENT))
-        self.agent_items = TodayList("agent")
-        self.agent_items.itemDoubleClicked.connect(self.open_agent)
-        self.agent_card.body.addWidget(self.agent_items)
-        self.agent_status_hint = label("正在读取已登记 Agent 的运行状态。", "TodayMuted")
-        self.agent_status_hint.setWordWrap(True)
-        self.agent_card.body.addWidget(self.agent_status_hint)
-
         self.scroll.setWidget(self.body)
         layout.addWidget(self.scroll, 1)
         self.arrange_columns()
@@ -352,7 +339,7 @@ class TodayPage(MarkdownPage):
                 and getattr(self, "two_metrics", None) == two_metrics):
             return
         self.narrow, self.balanced_columns, self.two_metrics = narrow, balanced, two_metrics
-        for widget in (self.task_card, self.top_side, self.project_card, self.agent_card):
+        for widget in (self.task_card, self.top_side, self.project_card):
             self.columns_layout.removeWidget(widget)
         for column in range(12):
             self.columns_layout.setColumnStretch(column, 1)
@@ -366,17 +353,15 @@ class TodayPage(MarkdownPage):
             self.columns_layout.addWidget(self.top_side, 0, task_columns, 1, side_columns)
         if narrow:
             self.columns_layout.addWidget(self.project_card, 2, 0, 1, 12)
-            self.columns_layout.addWidget(self.agent_card, 3, 0, 1, 12)
         else:
-            self.columns_layout.addWidget(self.project_card, 1, 0, 1, 6)
-            self.columns_layout.addWidget(self.agent_card, 1, 6, 1, 6)
+            self.columns_layout.addWidget(self.project_card, 1, 0, 1, 12)
         for widget in self.metrics:
             self.metric_grid.removeWidget(widget)
         for i, widget in enumerate(self.metrics):
             widget.icon.setVisible(not two_metrics)
             self.metric_grid.addWidget(widget, i // 2 if two_metrics else 0, i % 2 if two_metrics else i)
-        for i in range(4):
-            self.metric_grid.setColumnStretch(i, 1 if i < (2 if two_metrics else 4) else 0)
+        for i in range(3):
+            self.metric_grid.setColumnStretch(i, 1 if i < (2 if two_metrics else 3) else 0)
 
     def add_current_entry(self):
         self.add_entry("今日任务")
@@ -498,6 +483,19 @@ class TodayPage(MarkdownPage):
                          "time": "", "day": task["due_date"], "planned_task_id": task["id"],
                          "project_id": task["project_id"], "source": task["source"], "notes": task["notes"]}
                 report["tasks"].append(entry)
+            if self.day == date.today():
+                current_ids = {row.get("planned_task_id") for row in report["tasks"] if row.get("planned_task_id")}
+                for task in self.window.store.planned_tasks(limit=5000):
+                    due = task.get("due_date") or ""
+                    if (task["kind"] != "task" or task["status"] == "done" or not due
+                            or due >= self.day.isoformat() or task["id"] in current_ids):
+                        continue
+                    report["tasks"].append({"line": -1, "text": task["title"], "title": task["title"],
+                        "done": False, "priority": priority_labels.get(task["priority"], ""),
+                        "time": "", "day": self.day.isoformat(), "overdue_origin": due,
+                        "planned_task_id": task["id"], "project_id": task["project_id"],
+                        "source": task["source"], "notes": task["notes"]})
+                    current_ids.add(task["id"])
             context.checkpoint()
             projects, errors = [], []
             watches = [str(notes_root), str(Path(report["path"]).parent), report["path"]]
@@ -581,7 +579,9 @@ class TodayPage(MarkdownPage):
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Checked if row["done"] else Qt.CheckState.Unchecked)
             item.setData(ROW_DATA, row)
-            if row.get("source") != "ai":
+            if row.get("overdue_origin"):
+                item.setToolTip(title + "\n遗留任务 · 原计划 " + row["overdue_origin"])
+            elif row.get("source") != "ai":
                 item.setToolTip(title)
             self.tasks.addItem(item)
         self.tasks.blockSignals(False)
@@ -632,61 +632,24 @@ class TodayPage(MarkdownPage):
         self.refresh_module_tiles()
         self.watch(report["watches"])
 
-    def render_agent_activity(self, rows):
-        self.agent_rows = rows or []
-        running_count = sum(bool(row[3]) for row in self.agent_rows)
-        self.agent_items.clear()
-        for _, _, resource, running, detail in self.agent_rows[:4]:
-            status = "运行中" if running else "空闲"
-            item = QListWidgetItem(resource.name + " · " + status)
-            item.setData(Qt.ItemDataRole.UserRole, resource.id)
-            item.setData(ROW_DATA, {"title": resource.name, "running": running, "detail": detail})
-            item.setToolTip(resource.name + "\n" + status + " · " + detail + "\n双击查看 Agent")
-            self.agent_items.addItem(item)
-        if not self.agent_items.count():
-            self.agent_items.addItem("尚未登记工作 Agent。")
-        self.agent_items.fit(4)
-        total = len(self.agent_rows)
-        self.agent_card.title.setText(f"Agent 状态  ({running_count}/{total} 运行中)")
-        self.agent_status_hint.setText(
-            f"检测到 {running_count} / {total} 个已登记 Agent 正在运行。" if total
-            else "在 Agent 页登记常用 Agent 后，这里会显示本机进程状态。")
-        self.metrics[2].value.setText(f"{running_count} / {total}")
-        self.metrics[2].note.setText("检测到运行进程" if running_count else "暂无 Agent 运行" if total else "先登记常用 Agent")
-        self.refresh_module_tiles()
-
     def refresh_module_tiles(self):
         """Refresh module entry subtitles from already-loaded local page data."""
         if not hasattr(self, "module_buttons"):
             return
-        agent_page = getattr(self.window, "agent_page", None)
-        environment_page = getattr(self.window, "environment_page", None)
-        tracking_page = getattr(self.window, "file_tracking_page", None)
-        agents = len(getattr(agent_page, "resources_data", []))
+        safety_page = getattr(self.window, "safety_page", None)
         resources_loaded = bool(getattr(getattr(self.window, "knowledge_page", None), "loaded_once", False))
-        environment = getattr(environment_page, "report", None)
-        installed = sum(bool(row.get("installed")) for row in environment.get("tools", [])) if environment else None
-        roots = getattr(tracking_page, "roots", [])
-        events = getattr(tracking_page, "events", [])
-        today = date.today().isoformat()
-        changes_today = sum(1 for event in events if event.get("time", "").startswith(today))
+        safety_entries = getattr(safety_page, "entries", [])
+        needs_attention = sum(entry.get("health", {}).get("state") not in {"已校验", "已演练"}
+                              for entry in safety_entries)
         details = (
             "今日任务与周月总结",
             f"{sum(row['state'] not in {'completed', 'paused'} for row in self.projects)} 个进行中项目" if self.report else "项目进展与资料",
             f"{len(getattr(self.window.knowledge_page, 'items', []))} 项资料" if resources_loaded else "文件、链接、笔记与标签",
-            f"{agents} 个已登记" if agent_page else "登记、Skills 与状态",
-            f"{installed} / 8 项工具已安装" if installed is not None else "开发工具与环境变量",
-            f"{len(roots)} 个目录 · 今日变更 {changes_today}" if tracking_page else "本机文件变更追踪",
+            f"{len(safety_entries)} 项资料 · {needs_attention} 项待处理" if safety_entries else "资料备份、校验与恢复",
             "外观与工作区偏好",
         )
         for action_button, spec, detail in zip(self.module_buttons, self.module_specs, details):
             action_button.setText(spec[0] + "\n" + detail)
-
-    def open_agent(self, item):
-        identity = item.data(Qt.ItemDataRole.UserRole)
-        if identity:
-            self.window.navigation.setCurrentRow(self.window.AGENT)
-            self.window.agent_page.refresh(identity)
 
     def refresh_attention(self, reminders=None):
         self.attention.clear()
@@ -707,8 +670,8 @@ class TodayPage(MarkdownPage):
             empty.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.attention.addItem(empty)
         self.attention.fit(4)
-        self.metrics[3].value.setText(str(count) + " 项")
-        self.metrics[3].note.setText("周期任务与已到期事项" if count else "暂无周期或到期提醒")
+        self.metrics[2].value.setText(str(count) + " 项")
+        self.metrics[2].note.setText("周期任务与已到期事项" if count else "暂无周期或到期提醒")
         self.attention_card.title.setText("今日提醒" + (f"  ({count})" if count else ""))
 
     def open_plan_records(self):
@@ -726,7 +689,9 @@ class TodayPage(MarkdownPage):
         else:
             daily, expected, line = self.daily(), self.report["original"], target[1]
             operation = lambda context: daily.toggle(line, done, expected)
+        self.task_save_refreshed = False
         def saved(_):
+            self.task_save_refreshed = True
             self.refresh()
             self.window.planning_page.refresh()
             self.window.project_page.refresh()
@@ -742,7 +707,10 @@ class TodayPage(MarkdownPage):
             QTimer.singleShot(200, self.enable_tasks)
         else:
             self.tasks.setEnabled(True)
-            self.refresh()
+            # Success already reloads the day. Retry only if saving failed,
+            # so the optimistic checkbox is restored from persisted data.
+            if not getattr(self, "task_save_refreshed", False):
+                self.refresh()
 
     def open_daily(self):
         if self.report:
@@ -1296,8 +1264,6 @@ class CatalogPage(MarkdownPage):
         self.message.setText("；".join(report["errors"]) if report["errors"] else f"{len(self.items)} 个资源 · 正文保存为 Markdown，与 Obsidian 使用同一份文件。")
         self.render()
         self.watch([str(self.catalog.files.root), str(self.catalog.files.root / "资源"), *[i["path"] for i in self.items]])
-        if hasattr(self.window, "agent_page"):
-            self.window.agent_page.catalog_updated(self.items)
 
     def rebuild_filters(self):
         tags = sorted({str(tag) for item in self.items for tag in item["metadata"].get("tags", [])}, key=str.casefold)
@@ -1879,588 +1845,3 @@ class CatalogPage(MarkdownPage):
 
     def clear_scope(self):
         self.set_scope()
-
-
-class AgentPage(QWidget):
-    """Daily entry points for the same registered objects used by existing adapters."""
-    def __init__(self, window):
-        super().__init__()
-        self.setObjectName("AgentPage")
-        self.window = window
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 15, 18, 14)
-        layout.setSpacing(9)
-        heading_row = QHBoxLayout()
-        heading = QLabel("Agent 管理")
-        heading.setObjectName("Title")
-        heading_row.addWidget(heading, 1)
-        self.register_agent_button = control("＋ 新建 Agent", lambda: window.add_resource("agent"), True)
-        self.register_menu_button = QToolButton()
-        self.register_menu_button.setText("⋯")
-        self.register_menu_button.setToolTip("登记其他 Agent 类型")
-        self.register_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        register_menu = QMenu(self.register_menu_button)
-        register_menu.addAction("登记本地 Hermes", lambda: window.add_resource("hermes_local"))
-        register_menu.addAction("登记服务器 Hermes", lambda: window.add_resource("hermes_server"))
-        self.register_menu_button.setMenu(register_menu)
-        self.refresh_button = control("刷新", self.refresh)
-        for widget in (self.refresh_button, self.register_menu_button, self.register_agent_button):
-            heading_row.addWidget(widget)
-        layout.addLayout(heading_row)
-        note = QLabel("管理已登记的 Agent，查看本机操作记录、Skills、配置与备份状态。")
-        note.setWordWrap(True)
-        note.setObjectName("Subtitle")
-        layout.addWidget(note)
-        # Keep registered Agents in a compact horizontal card picker.
-        list_heading = QHBoxLayout()
-        self.list_title = QLabel("已登记的 Agent")
-        self.list_title.setObjectName("SectionTitle")
-        self.agent_count = QLabel("0 个")
-        self.agent_count.setObjectName("Subtitle")
-        list_heading.addWidget(self.list_title)
-        list_heading.addWidget(self.agent_count)
-        list_heading.addStretch(1)
-        self.search = QLineEdit()
-        self.search.setObjectName("AgentSearch")
-        self.search.setPlaceholderText("搜索 Agent…")
-        self.search.setMaximumWidth(260)
-        self.search.textChanged.connect(self.render_list)
-        list_heading.addWidget(self.search)
-        layout.addLayout(list_heading)
-        self.listing = QListWidget()
-        self.listing.setObjectName("AgentListing")
-        self.listing.setSpacing(8)
-        self.listing.setIconSize(QSize(38, 38))
-        self.listing.setFlow(QListWidget.Flow.LeftToRight)
-        self.listing.setWrapping(False)
-        self.listing.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.listing.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.listing.setMovement(QListWidget.Movement.Static)
-        self.listing.setFixedHeight(108)
-        self.listing.currentItemChanged.connect(self.render)
-        self.listing.itemClicked.connect(self._listing_clicked)
-        layout.addWidget(self.listing)
-        workspace = QSplitter(Qt.Orientation.Horizontal)
-        workspace.setObjectName("AgentWorkspace")
-        profile_panel = QWidget()
-        profile_panel.setObjectName("AgentProfilePanel")
-        profile_panel.setMinimumWidth(420)
-        profile_layout = QVBoxLayout(profile_panel)
-        profile_layout.setContentsMargins(0, 0, 0, 0)
-        profile_layout.setSpacing(9)
-        self.hero = QFrame()
-        self.hero.setObjectName("AgentHero")
-        hero_layout = QVBoxLayout(self.hero)
-        hero_layout.setContentsMargins(14, 12, 14, 11)
-        hero_top = QHBoxLayout()
-        self.agent_icon = QLabel("A")
-        self.agent_icon.setObjectName("AgentIcon")
-        self.agent_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.agent_icon.setFixedSize(62, 62)
-        hero_top.addWidget(self.agent_icon)
-        hero_title_col = QVBoxLayout()
-        self.agent_name = QLabel("选择一个 Agent")
-        self.agent_name.setObjectName("AgentName")
-        self.agent_kind = QLabel("登记后，这里会显示入口、记录和备份状态。")
-        self.agent_kind.setObjectName("Subtitle")
-        hero_title_col.addWidget(self.agent_name)
-        hero_title_col.addWidget(self.agent_kind)
-        hero_top.addLayout(hero_title_col, 1)
-        hero_layout.addLayout(hero_top)
-        self.agent_meta = QLabel("")
-        self.agent_meta.setObjectName("AgentMeta")
-        self.agent_meta.setWordWrap(True)
-        hero_layout.addWidget(self.agent_meta)
-        path_row = QHBoxLayout()
-        self.agent_path = QLabel("")
-        self.agent_path.setObjectName("AgentPath")
-        self.agent_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.agent_path.setWordWrap(True)
-        path_row.addWidget(self.agent_path, 1)
-        self.copy_path_button = control("复制路径", self.copy_path)
-        self.copy_path_button.setEnabled(False)
-        path_row.addWidget(self.copy_path_button)
-        hero_layout.addLayout(path_row)
-
-        quick_panel = QFrame()
-        quick_panel.setObjectName("AgentQuickPanel")
-        quick_layout = QVBoxLayout(quick_panel)
-        quick_layout.setContentsMargins(12, 12, 12, 12)
-        quick_title = QLabel("快捷操作")
-        quick_title.setObjectName("SectionTitle")
-        quick_layout.addWidget(quick_title)
-        quick_grid = QGridLayout()
-        quick_grid.setSpacing(7)
-        self.actions = []
-        for text, action, primary in (("打开 Agent", self.open_agent, True), ("查看日志", self.records, False),
-                             ("编辑配置", self.edit, False), ("打开目录", self.directory, False)):
-            widget = control(text, action, primary)
-            self.actions.append(widget)
-            widget.setMinimumHeight(34)
-            position = len(self.actions) - 1
-            quick_grid.addWidget(widget, position // 2, position % 2)
-        self.lifecycle_buttons = {}
-        for index, (name, action) in enumerate((("启动", "start"), ("停止", "stop"), ("重启", "restart"))):
-            widget = control(name, lambda checked=False, action=action: self.window.perform(self.selected(), action))
-            widget.setMinimumHeight(32)
-            widget.setVisible(False)
-            widget.setEnabled(False)
-            self.lifecycle_buttons[action] = widget
-            quick_grid.addWidget(widget, 2 + index // 2, index % 2)
-        quick_layout.addLayout(quick_grid)
-        quick_layout.addStretch(1)
-        self.quick_panel = quick_panel
-
-        self.backup_section = self._section("备份状态", 10)
-        self.backup_summary = QLabel("选择 Agent 查看最近备份状态。")
-        self.backup_summary.setObjectName("AgentBackupSummary")
-        self.backup_summary.setWordWrap(True)
-        self.backup_section.body.addWidget(self.backup_summary)
-        backup_actions = QHBoxLayout()
-        self.backup_button = control("立即备份", self.backup_now, True)
-        self.verify_backup_button = control("校验备份", self.verify_backup)
-        self.backup_button.setEnabled(False)
-        self.verify_backup_button.setEnabled(False)
-        backup_actions.addWidget(self.backup_button, 1)
-        backup_actions.addWidget(self.verify_backup_button, 1)
-        self.backup_section.body.addLayout(backup_actions)
-
-        skills = self._section("Skills", 6, "管理 Skills", self.skills_resources)
-        self.skills_preview = QListWidget()
-        self.skills_preview.setObjectName("AgentCompactList")
-        self.skills_preview.itemDoubleClicked.connect(lambda *_: self.skills_resources())
-        skills.body.addWidget(self.skills_preview)
-
-        recent = self._section("最近活动", 13, "查看全部", lambda: self.show_tab(1))
-        self.recent_preview = QListWidget()
-        self.recent_preview.setObjectName("AgentCompactList")
-        self.recent_preview.itemDoubleClicked.connect(
-            lambda *_: self.window.show_resource_activity(self.selected()) if self.selected() else None)
-        recent.body.addWidget(self.recent_preview)
-
-        sidebar = QWidget()
-        sidebar.setObjectName("AgentSidebar")
-        sidebar.setMinimumWidth(285)
-        sidebar.setMaximumWidth(420)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        sidebar_layout.setSpacing(9)
-        sidebar_layout.addWidget(quick_panel)
-        sidebar_layout.addWidget(self.backup_section)
-        sidebar_layout.addWidget(skills, 1)
-        sidebar_layout.addWidget(recent, 1)
-
-        profile_layout.addWidget(self.hero)
-
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.build_agent_overview(), "概览")
-        self.tabs.addTab(self.build_activity_tab(), "操作记录")
-        self.tabs.addTab(self.build_skills_tab(), "Skills")
-        self.tabs.addTab(self.build_resources_tab(), "相关资源")
-        self.tabs.addTab(self.build_notes_tab(), "备注")
-        profile_layout.addWidget(self.tabs, 1)
-        workspace.addWidget(profile_panel)
-        workspace.addWidget(sidebar)
-        workspace.setStretchFactor(0, 7)
-        workspace.setStretchFactor(1, 3)
-        workspace.setSizes([920, 360])
-        layout.addWidget(workspace, 1)
-        self.resources_data = []
-        self.catalog_items = []
-
-    def _section(self, title, icon, action=None, callback=None):
-        section = Section(title, icon, action, callback)
-        section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        return section
-
-    def build_agent_overview(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        usage = self._section("使用统计", 10)
-        usage_note = QLabel("仅统计管家本机已记录的操作，不包含 Agent 私有会话、调用次数或运行时长。")
-        usage_note.setObjectName("Subtitle")
-        usage_note.setWordWrap(True)
-        usage.body.addWidget(usage_note)
-        self.usage_summary = QLabel("请选择 Agent")
-        self.usage_summary.setObjectName("AgentUsageSummary")
-        usage.body.addWidget(self.usage_summary)
-        self.usage_bars = QWidget()
-        self.usage_bars_layout = QHBoxLayout(self.usage_bars)
-        self.usage_bars_layout.setContentsMargins(0, 8, 0, 0)
-        self.usage_bars_layout.setSpacing(8)
-        usage.body.addWidget(self.usage_bars, 1)
-        layout.addWidget(usage, 1)
-        return page
-
-    def build_activity_tab(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("此处只显示管家在本机记录的操作，不读取 Agent 私有会话。"), 1)
-        top.addWidget(control("打开完整操作记录", lambda: self.window.show_resource_activity(self.selected()) if self.selected() else None))
-        layout.addLayout(top)
-        self.activity_list = QListWidget()
-        self.activity_list.setObjectName("AgentCompactList")
-        self.activity_list.itemDoubleClicked.connect(lambda *_: self.window.show_resource_activity(self.selected()) if self.selected() else None)
-        layout.addWidget(self.activity_list, 1)
-        return page
-
-    def build_resources_tab(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("来自资源库中适用 Agent 与该类型的条目。"), 1)
-        row.addWidget(control("查看关联知识库资料", self.resources))
-        layout.addLayout(row)
-        self.resource_list = QListWidget()
-        self.resource_list.setObjectName("AgentCompactList")
-        self.resource_list.itemDoubleClicked.connect(lambda *_: self.resources())
-        layout.addWidget(self.resource_list, 1)
-        return page
-
-    def build_skills_tab(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("查看知识库中关联到当前 Agent 的资料。"), 1)
-        row.addWidget(control("在知识库中查看", self.skills_resources))
-        layout.addLayout(row)
-        self.skills_list = QListWidget()
-        self.skills_list.setObjectName("AgentCompactList")
-        self.skills_list.itemDoubleClicked.connect(lambda *_: self.resources())
-        layout.addWidget(self.skills_list, 1)
-        return page
-
-    def build_notes_tab(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("备注与使用说明保存在资源库 Markdown 中。"), 1)
-        row.addWidget(control("编辑备注", self.notes))
-        layout.addLayout(row)
-        self.notes_detail = QTextBrowser()
-        self.notes_detail.setOpenExternalLinks(False)
-        layout.addWidget(self.notes_detail, 1)
-        return page
-
-    def selected(self):
-        item = self.listing.currentItem()
-        value = item.data(Qt.ItemDataRole.UserRole) if item else None
-        return value if value is not None and not isinstance(value, str) else None
-
-    def refresh(self, selected_id=None, resources=None):
-        previous = self.selected()
-        identity = selected_id or (previous.id if previous else "")
-        if resources is None:
-            resources = self.window.store.resources()
-        self.resources_data = [r for r in resources if r.kind in {"agent", "hermes_local", "hermes_server"}]
-        self.render_list(identity)
-        self.catalog_items = list(getattr(self.window.catalog_page, "items", []))
-        catalog_page = self.window.catalog_page
-        if not catalog_page.loaded_once and not catalog_page.worker:
-            catalog_page.refresh()
-
-    def catalog_updated(self, items):
-        self.catalog_items = list(items)
-        self.render()
-
-    def render_list(self, selected_id=""):
-        previous = self.selected()
-        identity = selected_id or (previous.id if previous else "")
-        query = self.search.text().strip().casefold()
-        self.listing.blockSignals(True)
-        self.listing.clear()
-        shown = 0
-        for resource in self.resources_data:
-            engine = resource.options.get("engine", "服务器 Hermes" if resource.kind == "hermes_server" else "Hermes")
-            if query and query not in (resource.name + " " + engine).casefold():
-                continue
-            item = QListWidgetItem(resource.name + "\n" + engine + "\n已登记")
-            item.setSizeHint(QSize(230, 88))
-            icon = QPixmap(38, 38)
-            icon.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(icon)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            color = QColor("#7c4dff" if "hermes" in resource.kind else "#2675f5")
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(color)
-            painter.drawRoundedRect(0, 0, 38, 38, 9, 9)
-            painter.setPen(QColor("#ffffff"))
-            painter.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
-            painter.drawText(icon.rect(), Qt.AlignmentFlag.AlignCenter, "H" if "hermes" in resource.kind else engine[:1].upper())
-            painter.end()
-            item.setIcon(QIcon(icon))
-            item.setToolTip(resource.name + "\n" + engine)
-            item.setData(Qt.ItemDataRole.UserRole, resource)
-            self.listing.addItem(item)
-            shown += 1
-            if resource.id == identity:
-                self.listing.setCurrentItem(item)
-        if not shown:
-            empty_text = "尚未登记 Agent" if not self.resources_data else "没有匹配的 Agent"
-            empty = QListWidgetItem(empty_text)
-            empty.setFlags(Qt.ItemFlag.NoItemFlags)
-            empty.setSizeHint(QSize(230, 88))
-            self.listing.addItem(empty)
-        create_item = QListWidgetItem("＋\n新建 Agent")
-        create_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        create_item.setSizeHint(QSize(170, 88))
-        create_item.setData(Qt.ItemDataRole.UserRole, "__create_agent__")
-        self.listing.addItem(create_item)
-        if self.listing.currentRow() < 0 and self.listing.count():
-            if shown:
-                self.listing.setCurrentRow(0)
-        self.listing.blockSignals(False)
-        self.agent_count.setText(f"{shown} 个")
-        self.list_title.setText("已登记的 Agent")
-        self.render()
-
-    def _listing_clicked(self, item):
-        if item.data(Qt.ItemDataRole.UserRole) == "__create_agent__":
-            self.window.add_resource("agent")
-
-    def render(self, *_):
-        resource = self.selected()
-        for action in self.actions:
-            action.setEnabled(resource is not None)
-        for action, button in self.lifecycle_buttons.items():
-            button.setVisible(False)
-            button.setEnabled(False)
-        if not resource:
-            self.agent_name.setText("选择一个 Agent")
-            self.agent_kind.setText("登记后，这里会显示入口、操作记录和 Skills。")
-            self.agent_meta.clear()
-            self.agent_path.clear()
-            self.copy_path_button.setEnabled(False)
-            self.notes_detail.setPlainText("选择一个 Agent 查看备注。")
-            self.recent_preview.clear(); self.activity_list.clear()
-            self.resource_list.clear(); self.skills_list.clear(); self.skills_preview.clear()
-            self.usage_summary.setText("请选择 Agent")
-            self.backup_summary.setText("选择 Agent 查看最近备份状态。")
-            self.backup_button.setEnabled(False)
-            self.verify_backup_button.setEnabled(False)
-            self.current_path = ""
-            self.current_engine = ""
-            while self.usage_bars_layout.count():
-                item = self.usage_bars_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            return
-        used = self.window.store.evidence("agent-used:" + resource.id) or {}
-        options = resource.options
-        engine = options.get("engine", "服务器 Hermes" if resource.kind == "hermes_server" else "Hermes")
-        self.agent_name.setText(resource.name)
-        self.agent_icon.setText("H" if "hermes" in resource.kind else engine[:1].upper())
-        self.agent_kind.setText("● 已登记  ·  " + engine)
-        capabilities = self.window.service.registry.get(resource).capabilities
-        for action, button in self.lifecycle_buttons.items():
-            supported = action in capabilities
-            button.setVisible(supported)
-            button.setEnabled(supported and not self.window.is_busy(resource.id))
-        busy = self.window.is_busy(resource.id)
-        self.backup_button.setEnabled("backup" in capabilities and not busy)
-        self.verify_backup_button.setEnabled("verify" in capabilities and not busy)
-        try:
-            health = backup_health(self.window.store, resource, self.window.service.backup_root())
-            created = readable_time(health.get("created_at") or "")
-            created_text = f"最近备份：{created}" if created else "尚无本机备份记录"
-            evidence = " · 已校验" if health.get("verified") else " · 待校验" if health.get("source") else ""
-            self.backup_summary.setText(f"{health.get('state', '未知')}　{created_text}{evidence}")
-        except (OSError, UserError, ValueError):
-            self.backup_summary.setText("备份状态暂时无法读取，可在数据安全中查看详情。")
-        self.agent_meta.setText("最近从管家打开：" + (readable_time(used["at"]) if used else "尚未打开"))
-        data_dir = options.get("home") or options.get("config_dir") or options.get("path") or (options.get("record_paths") or [""])[0]
-        self.agent_path.setText("数据目录：" + (str(data_dir) if data_dir else "未设置"))
-        self.copy_path_button.setEnabled(bool(data_dir))
-        self.current_path = str(data_dir)
-        self.current_engine = engine
-        note = str(options.get("notes", ""))
-        agent_note = next((entry for entry in self.catalog_items
-                           if entry["type"] == "agent" and resource.id in entry["metadata"].get("agents", [])), None)
-        if agent_note:
-            note = agent_note["body"] or str(agent_note["metadata"].get("notes", ""))
-        if not note:
-            note = "暂无备注。可以记录使用习惯、配置说明或换电脑提醒。"
-        self.notes_detail.setMarkdown("# " + resource.name + " · 备注\n\n" + note)
-
-        record_paths = options.get("record_paths", [])
-        if isinstance(record_paths, str):
-            record_paths = [record_paths] if record_paths else []
-        existing_records = sum(Path(path).is_dir() for path in record_paths)
-        related = self.related_items(resource)
-        tasks = self.window.store.task_summaries(limit=100, resource_id=resource.id)
-        self.usage_summary.setText(f"最近记录 {len(tasks)} 条　·　可用记录目录 {existing_records}/{len(record_paths)}")
-        while self.usage_bars_layout.count():
-            item = self.usage_bars_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        today = date.today()
-        daily = {today - timedelta(days=offset): 0 for offset in range(6, -1, -1)}
-        for task in tasks:
-            stamp = str(task.get("started_at", ""))[:10]
-            try:
-                day = date.fromisoformat(stamp)
-            except ValueError:
-                continue
-            if day in daily:
-                daily[day] += 1
-        peak = max(daily.values(), default=0)
-        for day, count in daily.items():
-            column = QWidget()
-            column_layout = QVBoxLayout(column)
-            column_layout.setContentsMargins(3, 0, 3, 0)
-            count_label = QLabel(str(count))
-            count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            bar = QProgressBar()
-            bar.setOrientation(Qt.Orientation.Vertical)
-            bar.setRange(0, max(1, peak))
-            bar.setValue(count)
-            bar.setTextVisible(False)
-            bar.setFixedWidth(24)
-            bar.setMinimumHeight(74)
-            bar.setMaximumHeight(100)
-            day_label = QLabel(day.strftime("%m-%d"))
-            day_label.setObjectName("Subtitle")
-            day_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            column_layout.addWidget(count_label)
-            column_layout.addWidget(bar, 1, Qt.AlignmentFlag.AlignHCenter)
-            column_layout.addWidget(day_label)
-            self.usage_bars_layout.addWidget(column, 1)
-        if not tasks:
-            self.usage_summary.setText("暂无已记录的管家操作；不会推测 Agent 的调用量或运行时长。")
-        self.recent_preview.clear(); self.activity_list.clear()
-        if tasks:
-            for task in tasks:
-                stamp = readable_time(task.get("finished_at") or task.get("started_at") or "")
-                title = f"{task['title']}  ·  {stamp}  ·  {task['state']}"
-                self.recent_preview.addItem(title)
-                self.activity_list.addItem(title)
-        else:
-            self.recent_preview.addItem("暂无管家操作记录。")
-            self.activity_list.addItem("暂无管家操作记录。")
-        self.resource_list.clear(); self.skills_list.clear(); self.skills_preview.clear()
-        for entry in related:
-            title = entry["name"] + "  ·  " + TYPES.get(entry["type"], entry["type"])
-            self.resource_list.addItem(title)
-            if entry.get("type") == "skill":
-                self.skills_list.addItem(title)
-                self.skills_preview.addItem(title)
-        if not related:
-            self.resource_list.addItem("暂无关联资源。可从资源库关联。")
-        if not self.skills_list.count():
-            self.skills_list.addItem("暂无关联的 Skill。可从资源库关联已有 Skill 条目。")
-            self.skills_preview.addItem("暂无关联的 Skill")
-
-    def backup_now(self):
-        resource = self.selected()
-        if resource:
-            self.window.perform(resource, "backup")
-
-    def verify_backup(self):
-        resource = self.selected()
-        if resource:
-            self.window.perform(resource, "verify")
-
-    def related_items(self, resource):
-        catalog = self.catalog_items
-        refs = {resource.id.casefold(), self.current_engine.casefold() if hasattr(self, "current_engine") else resource.options.get("engine", "").casefold()}
-        return [entry for entry in catalog if refs & {str(value).casefold() for value in entry["metadata"].get("agents", [])}]
-
-    def show_tab(self, index):
-        self.tabs.setCurrentIndex(index)
-
-    def copy_path(self):
-        if getattr(self, "current_path", ""):
-            QApplication.clipboard().setText(self.current_path)
-            self.window.statusBar().showMessage("路径已复制", 2500)
-
-    def used(self, resource):
-        self.window.store.save_evidence("agent-used:" + resource.id, {"at": now()})
-        self.render()
-
-    def open_agent(self):
-        resource = self.selected()
-        if not resource:
-            return
-        entry = resource.options.get("entry_url", "")
-        if entry:
-            url = QUrl(entry)
-            if url.scheme() not in {"https", "http"} or not url.host() or url.userName() or url.password():
-                QMessageBox.information(self, "常用入口", "入口只支持 http / https 链接。应用启动程序可在登记中配置。")
-                return
-            if QDesktopServices.openUrl(url):
-                self.used(resource)
-            else:
-                QMessageBox.information(self, "常用入口", "系统未能打开链接，请检查默认浏览器设置。")
-        elif resource.options.get("executable") and resource.kind != "hermes_server":
-            self.window.perform(resource, "start")
-            self.used(resource)
-        elif resource.kind == "hermes_server":
-            QMessageBox.information(self, "服务器 Agent", "此登记用于管理远程 Hermes 服务；当前界面支持查看日志、检查和服务控制，尚未提供远程聊天窗口。")
-        else:
-            value = self.local_directory(resource)
-            if value:
-                if self.window.open_path(Path(value)):
-                    self.used(resource)
-
-    def records(self):
-        resource = self.selected()
-        if resource:
-            self.window.perform(resource, "records" if resource.kind == "agent" else "logs" if resource.kind == "hermes_server" else "library")
-
-    def resources(self):
-        resource = self.selected()
-        if resource:
-            self.window.knowledge_page.set_scope(agent=resource.id)
-            self.window.show_resource_hub()
-
-    def skills_resources(self):
-        resource = self.selected()
-        if resource:
-            self.window.knowledge_page.set_scope(agent=resource.id)
-            self.window.show_resource_hub()
-
-    def edit(self):
-        if self.selected():
-            self.window.edit_resource(self.selected())
-
-    def directory(self):
-        resource = self.selected()
-        if resource:
-            if resource.kind == "hermes_server":
-                QMessageBox.information(self, "远程目录", "这是服务器上的目录，不能作为本机文件夹打开。请使用“编辑配置”查看服务器路径。")
-            else:
-                value = self.local_directory(resource)
-                if value:
-                    self.window.open_path(Path(value))
-
-    def local_directory(self, resource):
-        value = resource.options.get("path") or resource.options.get("home") or (resource.options.get("record_paths") or [""])[0]
-        if not value:
-            QMessageBox.information(self, "补充 Agent 入口", "在“编辑登记”中选择项目或资料目录，或填写常用入口。当前登记已保留。")
-        return value
-
-    def notes(self):
-        resource = self.selected()
-        if not resource:
-            return
-        page = self.window.catalog_page
-        catalog = Catalog(work_root(self.window.store))
-        def loaded(report):
-            page.catalog = catalog
-            item = next((i for i in report["items"] if i["type"] == "agent" and resource.id in i["metadata"].get("agents", [])), None)
-            if item:
-                page.edit_item(item, self.resources)
-            else:
-                dialog = CatalogDialog(self)
-                dialog.fields["name"].setText(resource.name + " · 使用说明与备注")
-                dialog.kind.setCurrentIndex(dialog.kind.findData("agent"))
-                dialog.fields["agents"].setText(resource.id)
-                if dialog.exec() == QDialog.DialogCode.Accepted:
-                    metadata, body = dialog.metadata(), dialog.body.toPlainText()
-                    def saved(report):
-                        page.preferred_path = report["path"]
-                        self.resources()
-                    self.window.submit(None, "保存 Agent 备注 Markdown", lambda context: catalog.save(metadata, body), saved, persist_result=False)
-        self.window.submit(None, "定位 Agent 备注", catalog.scan, loaded, persist_result=False)

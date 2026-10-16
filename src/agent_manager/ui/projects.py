@@ -22,19 +22,21 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QL
     QComboBox, QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QSplitter, QTextBrowser, QDialog, QDialogButtonBox, QFormLayout, QTextEdit, QCheckBox,
     QFileDialog, QMessageBox, QInputDialog, QListWidget, QListWidgetItem, QToolButton,
-    QFrame, QSizePolicy, QScrollArea, QTreeWidget, QTreeWidgetItem)
+    QFrame, QSizePolicy, QScrollArea, QTreeWidget, QTreeWidgetItem, QApplication)
 
 from ..domain import Resource, UserError
-from ..project_workspaces import ProjectWorkspace, STATES
+from ..project_workspaces import ProjectWorkspace, STATES, today
+from ..project_prompts import project_prompt
 from ..obsidian import project_uri, project_notes_uri, open_uri
 from ..workbench import (TYPES, Catalog, work_root, project_context, summaries)
 from ..task_migration import legacy_ref
 from ..ai_task_execution import execute_codex_task
 from .components import FlowLayout, nav_icon
 from .tasks import ReadWorker
+from .project_initialization import ProjectInitializationPanel
 from .today_widgets import COLORS, ROW_DATA, label
 from .project_widgets import (ProjectCardDelegate, ProjectMetric, ProjectMetrics, ProjectHero,
-    ProjectOverview, overview_snapshot, milestone_rows)
+    ProjectOverview, overview_snapshot, milestone_rows, milestone_snapshot)
 from .task_dialog import UnifiedTaskDialog
 
 
@@ -571,13 +573,50 @@ class ProjectLogView(QWidget):
             self.view.setPlainText("还没有按日期记录的日志。可在 Obsidian 中打开 HANDOFF.md，直接编写日志与交接内容。")
 
 
+class ProjectPromptDialog(QDialog):
+    def __init__(self, parent, item, *, initial=False):
+        super().__init__(parent)
+        self.setWindowTitle("项目 AI 提示词")
+        self.resize(720, 600)
+        layout = QVBoxLayout(self)
+        hint = QLabel("选择用途，复制后交给 AI，并附上本轮具体需求。每次实质任务须更新状态、任务和项目动态。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.mode = QComboBox()
+        self.mode.addItems(["新项目初始化", "已有项目接手"])
+        self.mode.setCurrentIndex(0 if initial else 1)
+        layout.addWidget(self.mode)
+        self.preview = QTextEdit()
+        self.preview.setReadOnly(True)
+        layout.addWidget(self.preview, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        self.copy_button = buttons.addButton("复制提示词", QDialogButtonBox.ButtonRole.ActionRole)
+        self.copy_button.setProperty("primary", True)
+        self.copy_button.clicked.connect(self.copy_prompt)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.item = item
+        self.mode.currentIndexChanged.connect(self.refresh_prompt)
+        self.refresh_prompt()
+
+    def refresh_prompt(self, *_):
+        self.preview.setPlainText(project_prompt(
+            self.item["name"], self.item["id"], self.item["directory"], initial=self.mode.currentIndex() == 0))
+        self.copy_button.setText("复制提示词")
+
+    def copy_prompt(self):
+        QApplication.clipboard().setText(self.preview.toPlainText())
+        self.copy_button.setText("已复制")
+
+
 class ProjectDialog(QDialog):
     def __init__(self, parent, legacy=None):
         super().__init__(parent)
-        self.setWindowTitle("新建项目 · 按既有规范初始化")
-        self.resize(620, 420)
+        self.setWindowTitle("新建项目")
+        self.resize(820, 680)
         layout = QVBoxLayout(self)
-        note = QLabel("填写项目中文名称和目标。英文目录名用于生成安全、精简的项目路径；编号自动分配。")
+        note = QLabel("填写基本信息，按需调整规范、添加技能与资料，最后确认创建。")
         note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout()
@@ -608,14 +647,61 @@ class ProjectDialog(QDialog):
         form.addRow("", self.folder_hint)
         form.addRow("项目目标", self.goal)
         form.addRow("", self.entry)
-        layout.addLayout(form)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("一键初始化")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        buttons.accepted.connect(self.confirm)
-        buttons.rejected.connect(self.reject)
+        basic_page = QWidget()
+        basic_layout = QVBoxLayout(basic_page)
+        basic_layout.addLayout(form)
+        self.goal.setMaximumHeight(160)
+        basic_layout.addStretch()
+        self.initialization_panel = ProjectInitializationPanel(
+            self, getattr(parent, "window", None), self.initialization_preview_context)
+        self.initialization_panel.insertTab(0, basic_page, "项目信息")
+        for i in range(self.initialization_panel.count()):
+            self.initialization_panel.setTabText(i, f"{i + 1}. " + self.initialization_panel.tabText(i))
+        self.initialization_panel.setCurrentIndex(0)
+        layout.addWidget(self.initialization_panel, 1)
+        self.initialization_selection = None
+        self.finished.connect(self.initialization_panel.cancel_reads)
+        footer = QHBoxLayout()
+        self.step_label = QLabel()
+        footer.addWidget(self.step_label, 1)
+        self.back_button = QPushButton("上一步")
+        self.back_button.clicked.connect(lambda: self.initialization_panel.setCurrentIndex(self.initialization_panel.currentIndex() - 1))
+        footer.addWidget(self.back_button)
+        self.next_button = QPushButton("下一步")
+        self.next_button.setProperty("primary", True)
+        self.next_button.clicked.connect(self.next_step)
+        footer.addWidget(self.next_button)
+        self.create_button = QPushButton("创建项目")
+        self.create_button.setProperty("primary", True)
+        self.create_button.clicked.connect(self.confirm)
+        footer.addWidget(self.create_button)
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(self.reject)
+        footer.addWidget(cancel_button)
         self.translate_button.clicked.connect(self.translate_name)
-        layout.addWidget(buttons)
+        self.initialization_panel.currentChanged.connect(self.update_step)
+        layout.addLayout(footer)
+        self.update_step()
+
+    def update_step(self, *_):
+        index = self.initialization_panel.currentIndex()
+        last = index == self.initialization_panel.count() - 1
+        self.step_label.setText(f"第 {index + 1} 步，共 4 步")
+        self.back_button.setEnabled(index > 0)
+        self.next_button.setVisible(not last)
+        self.next_button.setDefault(not last)
+        self.create_button.setVisible(last)
+        self.create_button.setDefault(last)
+
+    def next_step(self):
+        if self.initialization_panel.currentIndex() == 0 and not self.validate_basics():
+            return
+        try:
+            self.initialization_panel.selection()
+        except UserError as exc:
+            QMessageBox.warning(self, "请检查所选内容", str(exc))
+            return
+        self.initialization_panel.setCurrentIndex(min(self.initialization_panel.currentIndex() + 1, 3))
 
     @staticmethod
     def _translate_name(cancel, name):
@@ -657,16 +743,38 @@ class ProjectDialog(QDialog):
         self.folder_name.setText(slug)
         self.folder_hint.setText("翻译建议：" + translated + "。保存时会规范化为安全目录名：" + slug)
 
-    def confirm(self):
+    def validate_basics(self):
         if not self.name.text().strip() or not self.folder_name.text().strip() or not self.goal.toPlainText().strip():
             QMessageBox.information(self, "补充项目信息", "请填写项目名称、英文目录名和项目目标。")
-            return
+            return False
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", self.folder_name.text()).strip("-").lower()
         if not slug or len(slug) > 60:
             QMessageBox.information(self, "英文目录名无效", "目录名需为 1–60 个英文或数字字符；空格和标点会转换为连字符。")
-            return
+            return False
         self.folder_name.setText(slug)
+        return True
+
+    def confirm(self):
+        if self.initialization_panel.currentIndex() != 3:
+            self.next_step()
+            return
+        if not self.validate_basics():
+            self.initialization_panel.setCurrentIndex(0)
+            return
+        try:
+            self.initialization_selection = self.initialization_panel.selection()
+        except UserError as exc:
+            QMessageBox.warning(self, "初始化选项需要检查", str(exc))
+            return
         self.accept()
+
+    def initialization_preview_context(self):
+        project_root = self.parent().root() if self.parent() is not None else Path.cwd()
+        folder = self.folder_name.text().strip() or "project-folder"
+        identity = "P-" + today()[:4] + "-待分配"
+        return Path(project_root) / "projects" / (identity + "-" + folder), {
+            "NAME": self.name.text().strip() or "项目名称", "GOAL": self.goal.toPlainText().strip() or "待补充",
+            "ID": identity, "DATE": today()}
 
 
 class ProjectInfoDialog(QDialog):
@@ -1117,6 +1225,16 @@ class ProjectPage(QWidget):
         self.summary_view = QTextBrowser()
         self.summary_view.setOpenExternalLinks(True)
         self.project_docs.addTab(self.summary_view, "阶段总结")
+        prompt_page = QWidget()
+        prompt_layout = QVBoxLayout(prompt_page)
+        prompt_hint = QLabel("交给 AI 前复制提示词：首次明确目标与验收，后续接续任务；每轮实质进展写入项目动态。")
+        prompt_hint.setWordWrap(True)
+        prompt_layout.addWidget(prompt_hint)
+        self.project_prompt_button = QPushButton("查看 / 复制 AI 提示词")
+        self.project_prompt_button.clicked.connect(self.show_project_prompt)
+        prompt_layout.addWidget(self.project_prompt_button, 0, Qt.AlignmentFlag.AlignLeft)
+        prompt_layout.addStretch()
+        self.project_docs.addTab(prompt_page, "AI 提示词")
         project_material_page = QWidget()
         material_layout = QVBoxLayout(project_material_page)
         material_layout.setContentsMargins(16, 14, 16, 14)
@@ -1301,6 +1419,11 @@ class ProjectPage(QWidget):
             return
         self.submit("定位 Obsidian Agent 文档", lambda context: project_uri(workspace, project["id"], relative),
                     self.launch_obsidian, persist_result=False)
+
+    def show_project_prompt(self):
+        item = self.selected()
+        if item and item.get("state") not in {"archived", "unknown"}:
+            ProjectPromptDialog(self, item).exec()
 
     def populate_project_documents(self, report):
         self.project_material_rows = report.get("documents", [])
@@ -1837,16 +1960,11 @@ class ProjectPage(QWidget):
             return
         def loaded(report):
             vault_sync = report.get("vault_sync", {})
-            project_tasks = self.window.store.planned_tasks(project_root=str(root.resolve()), limit=5000)
-            by_project = {}
-            for task in project_tasks:
-                by_project.setdefault(task["project_id"], []).append(task)
+            milestone_progress = report.get("milestone_progress", {})
             self.project_rows = []
             for project in report["projects"]:
                 item = dict(project)
-                tasks = by_project.get(item["id"], [])
-                if tasks:
-                    item["progress"] = round(sum(task["status"] == "done" for task in tasks) * 100 / len(tasks))
+                item["progress"] = milestone_progress.get(item["id"])
                 info = item.get("project_info", {})
                 if not isinstance(info, dict):
                     info = {}
@@ -1869,7 +1987,17 @@ class ProjectPage(QWidget):
             workspace = self.workspace()
             vault_sync = workspace.sync_archived_vault_entries(context)
             report = workspace.list_projects(context)
+            milestone_progress = {}
+            for project in report["projects"]:
+                context.checkpoint()
+                try:
+                    document = workspace.milestones_document(project["id"])
+                    milestones = milestone_rows(document["text"]) if document.get("exists") else []
+                    milestone_progress[project["id"]] = milestone_snapshot(milestones)["progress"]
+                except (OSError, UserError):
+                    milestone_progress[project["id"]] = None
             report["vault_sync"] = vault_sync
+            report["milestone_progress"] = milestone_progress
             return report
         self.submit("同步归档项目入口并读取登记", load_projects, loaded, persist_result=False)
 
@@ -1937,10 +2065,11 @@ class ProjectPage(QWidget):
         archived = bool(item and item["state"] == "archived")
         state_valid = bool(item and item.get("state") != "unknown")
         self.edit_project_info_button.setEnabled(enabled and not archived)
+        self.project_prompt_button.setEnabled(enabled and not archived and state_valid)
         current_tab = self.documents.currentWidget()
         has_obsidian_document = any(
             current_tab is page for page in (self.overview, self.milestones_page, self.project_docs)
-        )
+        ) and not (current_tab is self.project_docs and self.project_docs.currentIndex() == 3)
         self.obsidian_button.setEnabled(enabled and has_obsidian_document)
         self.obsidian_button.setText("在 Obsidian 中编辑")
         self.obsidian_button.setToolTip("打开当前标签对应的项目原文；任务请使用单独任务文档")
@@ -2347,8 +2476,11 @@ class ProjectPage(QWidget):
             self.set_state_filter("active")
             self.preferred_project = report["project_id"]
             self.refresh()
-            QMessageBox.information(self, "项目已初始化", report["project_id"] + "\n" + report["directory"] + "\n\n已建立状态、任务和交接文件；项目已加入进行中列表。")
-        self.submit("初始化新项目", lambda context: workspace.create(name, goal, entry, context, folder_name), completed)
+            ProjectPromptDialog(self, {"id": report["project_id"], "name": name,
+                                       "directory": report["directory"]}, initial=True).exec()
+        initialization = dialog.initialization_selection
+        self.submit("初始化新项目", lambda context: workspace.create(name, goal, entry, context, folder_name,
+                                                                    initialization), completed)
 
     def open_project(self):
         item = self.selected()

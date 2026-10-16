@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
-KINDS = {"hermes_local": "本地 Hermes", "hermes_server": "服务器 Hermes", "project": "本地项目", "vault": "Obsidian", "agent": "Agent"}
+KINDS = {"hermes_local": "本地 Hermes", "hermes_server": "服务器 Hermes", "project": "本地项目", "folder": "本地文件夹", "script": "脚本备份", "vault": "Obsidian", "agent": "Agent"}
 
 
 class UserError(Exception):

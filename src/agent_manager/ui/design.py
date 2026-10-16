@@ -145,7 +145,7 @@ def stylesheet(legacy, mode):
     for key, value in values.items():
         overrides = overrides.replace("@" + key + "@", value)
     # Page-specific rules previously gave primary actions conflicting colors.
-    pages = ("TodayPage", "PlanningDashboard", "PlanRecordsPanel", "ProjectPage", "AgentPage", "KnowledgePage", "CatalogPage", "SafetyPage", "SettingsPage")
+    pages = ("TodayPage", "PlanningDashboard", "PlanRecordsPanel", "ProjectPage", "KnowledgePage", "CatalogPage", "SafetyPage", "SettingsPage")
     scopes = ["QPushButton[primary=\"true\"]", "QDialog QPushButton[primary=\"true\"]",
               "QWidget#PlanningDashboard QFrame#PlanHero QPushButton[primary=\"true\"]",
               "QDialog#PlanEntryDialog QPushButton[primary=\"true\"]"]
@@ -160,6 +160,22 @@ def stylesheet(legacy, mode):
 _QSS = """
 QWidget { font-family: "Microsoft YaHei UI", "Segoe UI", "Noto Sans SC"; color: @text@; font-size: 13px; }
 QWidget#KnowledgePage QTreeWidget#KnowledgeTree::branch:has-children:closed { image: url("@assets@/chevron-right-@arrow@.svg"); }
+QWidget#KnowledgePage QFrame#KnowledgeEmptyCard { background: @surface@; border: 1px solid @border@; border-radius: 16px; }
+QWidget#KnowledgePage QLabel#KnowledgeEmptyIcon { background: @accent_soft@; color: @accent_ink@; border-radius: 14px; font-size: 18px; font-weight: 700; }
+QWidget#KnowledgePage QLabel#KnowledgeEmptyTitle { color: @text@; font-size: 18px; font-weight: 700; }
+QWidget#KnowledgePage QLabel#KnowledgeEmptyDescription { color: @muted@; font-size: 12px; }
+QWidget#KnowledgePage QPushButton#KnowledgeEmptyAction { min-height: 32px; padding: 6px 18px; }
+QWidget#KnowledgePage QWidget#KnowledgePanel { background: @surface@; border: 1px solid @border@; border-radius: 14px; }
+QWidget#KnowledgePage QSplitter#KnowledgeWorkspace::handle { background: transparent; width: 8px; }
+QWidget#KnowledgePage QFrame#KnowledgeLocation { background: @soft@; border: 1px solid @border@; border-radius: 10px; }
+QWidget#KnowledgePage QLabel#KnowledgeLocationIcon { color: @accent_ink@; font-size: 17px; }
+QWidget#KnowledgePage QLabel#KnowledgeLocationCaption { color: @muted@; font-size: 10px; }
+QWidget#KnowledgePage QLabel#KnowledgeLocationPath { color: @text@; font-size: 11px; font-weight: 600; }
+QWidget#KnowledgePage QPushButton#KnowledgeLocationOpen { min-height: 24px; padding: 3px 9px; border-radius: 7px; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick::item { color: @secondary@; padding: 6px 10px; margin: 1px 2px; border-radius: 7px; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick::item:selected { background: @accent_soft@; color: @accent_ink@; font-weight: 600; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree::item { color: @secondary@; padding: 5px 6px; margin: 1px 2px; border-radius: 7px; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree::item:selected { background: @accent_soft@; color: @accent_ink@; font-weight: 600; }
 QWidget#KnowledgePage QTreeWidget#KnowledgeTree::branch:has-children:open { image: url("@assets@/chevron-@arrow@.svg"); }
 QMainWindow, QWidget#Content, QWidget#DashboardBody, QWidget#SettingsBody { background: @canvas@; }
 QWidget#Sidebar { background: @sidebar@; border-right: 1px solid @border@; }
@@ -174,8 +190,6 @@ QWidget#Sidebar QListWidget#Navigation::item:selected { background: @sidebar_act
 QWidget#Sidebar QPushButton#SidebarHelp { background: @soft@; color: @secondary@; border: 1px solid @border@; border-radius: 8px; padding: 8px; }
 QWidget#Sidebar QPushButton#SidebarHelp:hover { background: @accent_soft@; color: @accent_ink@; }
 QWidget#GlobalTopbar { background: @surface@; border-bottom: 1px solid @border@; }
-QLineEdit#GlobalSearch { background: @soft@; border: 1px solid @border@; border-radius: 8px; padding: 7px 12px; min-height: 18px; }
-QLineEdit#GlobalSearch:focus { background: @surface@; border-color: @accent@; }
 QLabel#GlobalTopbarMeta { color: @secondary@; font-size: 12px; }
 QLabel#ProfileBadge { background: @accent_soft@; color: @accent_ink@; border: 1px solid @border@; border-radius: 17px; }
 QPushButton#TopbarIconButton { min-width: 24px; min-height: 24px; border: 1px solid transparent; padding: 4px; border-radius: 8px; }
@@ -239,7 +253,7 @@ QProgressBar::chunk { background: @accent@; border-radius: 4px; }
 QCalendarWidget QToolButton { color: @text@; background: @surface@; border: none; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: @soft@; }
 QCalendarWidget QAbstractItemView { background: @surface@; color: @text@; selection-background-color: @accent@; selection-color: #ffffff; }
-QLabel#Title, QWidget#SettingsPage QLabel#Title, QWidget#SafetyPage QLabel#Title, QWidget#AgentPage QLabel#Title { font-size: 26px; font-weight: 700; color: @text@; }
+QLabel#Title, QWidget#SettingsPage QLabel#Title, QWidget#SafetyPage QLabel#Title { font-size: 26px; font-weight: 700; color: @text@; }
 QLabel#Subtitle, QLabel#TodayMuted { color: @muted@; font-size: 12px; }
 QWidget#ProjectPage QLabel#ProjectName { color: @text@; font-size: 28px; font-weight: 700; }
 QLabel#SectionTitle, QLabel#TodaySectionTitle, QWidget#PlanningDashboard QLabel#TodaySectionTitle { color: @text@; font-size: 14px; font-weight: 600; }
@@ -251,16 +265,6 @@ QWidget#ProjectOverview QLabel#ProjectInfoLabel { color: @muted@; font-size: 10p
 QWidget#ProjectOverview QLabel#ProjectInfoValue { color: @text@; font-size: 12px; font-weight: 600; }
 QWidget#ProjectOverview QProgressBar#ProjectOverviewProgress { background: @soft@; border: none; border-radius: 5px; }
 QWidget#ProjectOverview QProgressBar#ProjectOverviewProgress::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 @accent_hover@,stop:1 @accent@); border-radius: 5px; }
-QWidget#AgentPage { background: @canvas@; }
-QWidget#AgentPage QFrame#AgentHero, QWidget#AgentPage QFrame#AgentQuickPanel, QWidget#AgentPage QFrame#TodayCard { background: @surface@; border: 1px solid @border@; border-radius: 13px; }
-QWidget#AgentPage QLabel#AgentName { color: @text@; }
-QWidget#AgentPage QLabel#AgentMeta, QWidget#AgentPage QLabel#AgentPath, QWidget#AgentPage QLabel#AgentBackupSummary, QWidget#AgentPage QLabel#AgentUsageSummary { color: @secondary@; }
-QWidget#AgentPage QLineEdit#AgentSearch { background: @surface@; color: @text@; border-color: @border@; }
-QWidget#AgentPage QListWidget#AgentListing::item { background: @surface@; color: @text@; border-color: @border@; }
-QWidget#AgentPage QListWidget#AgentListing::item:selected { background: @accent_soft@; color: @accent_ink@; border-color: @accent@; }
-QWidget#AgentPage QTabWidget::pane { background: @surface@; border: 1px solid @border@; border-radius: 11px; top: -1px; }
-QWidget#AgentPage QTabWidget QTabBar::tab { color: @secondary@; }
-QWidget#AgentPage QTabWidget QTabBar::tab:selected { color: @accent_ink@; }
 QWidget#ProjectOverview QLabel#ProjectMilestoneMark { color: @success@; min-width: 14px; font-weight: 700; }
 QWidget#ProjectOverview QFrame#ProjectMaterialRow { background: @soft@; border: 1px solid @border@; border-radius: 9px; }
 QWidget#ProjectOverview QFrame#ProjectMaterialRow:hover { background: @accent_soft@; border-color: @border_strong@; }
@@ -315,6 +319,8 @@ QWidget#PlanRecordsPanel QTabBar#PlanManagerFilter { background: @soft@; border:
 QWidget#PlanRecordsPanel QTabBar#PlanManagerFilter::tab { color: @secondary@; }
 QWidget#PlanRecordsPanel QTabBar#PlanManagerFilter::tab:selected { background: @surface@; border-color: @border@; color: @accent_ink@; }
 QWidget#PlanRecordsPanel QLabel#PlanManagerCount { color: @secondary@; }
+QWidget#PlanRecordsPanel QPushButton#PlanCreateRecurringButton { color: @accent_ink@; border-color: @border@; }
+QWidget#PlanRecordsPanel QPushButton#PlanCreateRecurringButton:hover { background: @accent_soft@; border-color: @accent@; }
 QWidget#PlanRecordsPanel QWidget#PlanManagerListPanel, QWidget#PlanRecordsPanel QWidget#PlanManagerDetailPanel { background: @surface@; border-color: @border@; }
 QWidget#PlanRecordsPanel QFrame#PlanDetailMetadata { background: @soft@; border: 1px solid @border@; border-radius: 10px; }
 QWidget#PlanRecordsPanel QLabel#PlanDetailMetaLabel { color: @secondary@; }
@@ -337,4 +343,110 @@ QDialog#PlanEntryDialog QLabel#PlanEntryDescription { font-size: 12px; color: @s
 QDialog#PlanEntryDialog QCheckBox#PlanEntryWeekday { border-color: @border_strong@; background: @surface@; color: @secondary@; }
 QDialog#PlanEntryDialog QCheckBox#PlanEntryWeekday:checked { border-color: @accent@; background: @accent_soft@; color: @accent_ink@; }
 QDialog#PlanEntryDialog QTextEdit#PlanEntryBody { font-family: "Cascadia Code", "Microsoft YaHei UI", "Noto Sans SC"; background: @surface@; color: @text@; }
+QDialog#KnowledgeCollectDialog { background: @canvas@; }
+QDialog#KnowledgeCollectDialog QFrame#KnowledgeCollectHeader { background: @accent_soft@; border: 1px solid @border@; border-radius: 11px; }
+QDialog#KnowledgeCollectDialog QLabel#KnowledgeCollectTitle { color: @text@; font-size: 16px; font-weight: 700; }
+QDialog#KnowledgeCollectDialog QLabel#KnowledgeCollectDescription { color: @secondary@; font-size: 12px; }
+QDialog#KnowledgeCollectDialog QTabWidget#KnowledgeCollectTabs::pane { background: @surface@; border: 1px solid @border@; border-radius: 10px; top: -1px; }
+QDialog#KnowledgeCollectDialog QTabWidget#KnowledgeCollectTabs QTabBar::tab { background: transparent; border: 1px solid transparent; border-radius: 8px; color: @muted@; padding: 8px 14px; margin: 0px 3px 5px 0px; }
+QDialog#KnowledgeCollectDialog QTabWidget#KnowledgeCollectTabs QTabBar::tab:selected { background: @accent_soft@; border-color: @border@; color: @accent_ink@; font-weight: 600; }
+QDialog#KnowledgeCollectDialog QTabWidget#KnowledgeCollectTabs QTabBar::tab:hover:!selected { background: @soft@; color: @text@; }
+QDialog#KnowledgeCollectDialog QLineEdit, QDialog#KnowledgeCollectDialog QComboBox, QDialog#KnowledgeCollectDialog QTextEdit { border-radius: 8px; }
+QDialog#KnowledgeCollectDialog QFrame#KnowledgeCollectFooter { border-top: 1px solid @border@; }
+QDialog#KnowledgeCollectDialog QDialogButtonBox QPushButton { min-width: 78px; padding: 8px 14px; }
+
+/* Knowledge, Agent and protection workspace surfaces share semantic tokens. */
+QWidget#KnowledgePage, QWidget#SafetyPage { background: @canvas@; }
+QWidget#KnowledgePage QLabel#Title { font-size: 26px; font-weight: 700; color: @text@; }
+QWidget#KnowledgePage QLineEdit#KnowledgeCapture { background: @soft@; border-color: @border@; border-radius: 9px; }
+QWidget#KnowledgePage QLineEdit#KnowledgeCapture:focus { background: @surface@; border-color: @accent@; }
+QWidget#KnowledgePage QTextBrowser, QWidget#KnowledgePage QListWidget, QWidget#KnowledgePage QTreeWidget#KnowledgeTree { background: @surface@; color: @text@; border-color: @border@; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick, QWidget#KnowledgePage QListWidget#KnowledgeCards { background: transparent; border: none; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick::item { padding: 4px 10px; margin: 0px 2px; border: none; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick::item:hover:!selected, QWidget#KnowledgePage QTreeWidget#KnowledgeTree::item:hover:!selected { background: @soft@; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree::branch:selected { background: @accent_soft@; }
+QWidget#KnowledgePage QTableWidget#KnowledgeFiles { background: @surface@; alternate-background-color: @soft@; border: none; color: @text@; }
+QWidget#KnowledgePage QTableWidget#KnowledgeFiles QHeaderView::section { background: @soft@; color: @muted@; border-bottom: 1px solid @border@; }
+QWidget#KnowledgePage QTableWidget#KnowledgeFiles::item { border-bottom: 1px solid @border@; }
+QWidget#KnowledgePage QTableWidget#KnowledgeFiles::item:selected { background: @accent_soft@; color: @accent_ink@; }
+QWidget#KnowledgePage QTabWidget::pane { border: none; background: @surface@; }
+QWidget#KnowledgePage QTabBar::tab { padding: 8px 8px; }
+QWidget#KnowledgePage QToolButton[primary="true"] { background: @accent@; border-color: @accent@; color: #ffffff; }
+QWidget#KnowledgePage QToolButton[primary="true"]:hover { background: @accent_hover@; }
+QWidget#KnowledgePage QToolButton[primary="true"]:pressed { background: @accent_pressed@; }
+QWidget#KnowledgePage QToolButton[primary="true"]:disabled { background: @border_strong@; border-color: @border_strong@; }
+QWidget#SafetyPage QFrame#SafetyMetric, QWidget#SafetyPage QFrame#SafetyChoice { background: @surface@; border: 1px solid @border@; border-radius: 12px; }
+QWidget#SafetyPage QFrame#SafetyMetric[metricRole="attention"] { background: @warning_soft@; border-color: @border@; }
+QWidget#SafetyPage QLabel#SafetyMetricValue { color: @text@; font-size: 22px; font-weight: 700; }
+QWidget#SafetyPage QFrame#SafetyMetric[metricRole="attention"] QLabel#SafetyMetricValue { color: @warning@; }
+QWidget#SafetyPage QLabel#SafetyMetricNote { color: @muted@; font-size: 12px; }
+QWidget#SafetyPage QFrame#SafetyAttention { background: @soft@; border: 1px solid @border@; border-radius: 12px; }
+QWidget#SafetyPage QLabel#SafetyAttentionIcon { background: @accent_soft@; color: @accent_ink@; }
+QWidget#SafetyPage QLabel#SafetyEmpty { background: @surface@; color: @muted@; border: 1px dashed @border_strong@; border-radius: 12px; padding: 28px; }
+QWidget#SafetyPage QTableWidget#SafetyResourcesTable { background: @surface@; alternate-background-color: @soft@; border: 1px solid @border@; border-radius: 12px; }
+QWidget#SafetyPage QTableWidget#SafetyResourcesTable QHeaderView::section { background: @soft@; color: @muted@; padding: 12px 10px; border-bottom: 1px solid @border@; }
+QWidget#SafetyPage QTableWidget#SafetyResourcesTable::item { padding: 10px; border-bottom: 1px solid @border@; }
+QWidget#SafetyPage QTableWidget#SafetyResourcesTable::item:selected { background: @accent_soft@; color: @text@; }
+QWidget#SafetyPage QLabel#SafetyResourceName { color: @text@; font-weight: 600; }
+QWidget#SafetyPage QLabel#SafetyResourceType { color: @muted@; font-size: 12px; }
+QWidget#SafetyPage QListWidget#SafetyVersionList { background: @surface@; color: @text@; border: 1px solid @border@; border-radius: 12px; padding: 8px; }
+QWidget#SafetyPage QListWidget#SafetyVersionList::item { border: none; border-bottom: 1px solid @border@; padding: 14px 12px; margin: 2px; }
+QWidget#SafetyPage QListWidget#SafetyVersionList::item:selected { background: @accent_soft@; color: @accent_ink@; border-radius: 8px; }
+QWidget#SafetyPage QPushButton#TextButton { color: @accent_ink@; }
+QWidget#SafetyPage QPushButton#TextButton:hover { background: @accent_soft@; }
+
+/* Agent registration browser and management workspace. */
+
+/* Data protection uses a two-column resource workspace. */
+QWidget#SafetyPage QFrame#SafetyRegistry, QWidget#SafetyPage QFrame#SafetyDetailCard { background: @surface@; border: 1px solid @border@; border-radius: 12px; }
+QWidget#SafetyPage QWidget#SafetyDetailBody { background: transparent; }
+QWidget#SafetyPage QSplitter#SafetyWorkspace::handle { background: transparent; width: 12px; }
+QWidget#SafetyPage QLabel#SafetyCount { color: @accent_ink@; background: @accent_soft@; border-radius: 10px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+QWidget#SafetyPage QLabel#SafetyFilterLabel { color: @secondary@; font-size: 11px; font-weight: 600; padding: 2px 1px 0px 1px; }
+QWidget#SafetyPage QComboBox#SafetyKindFilter, QWidget#SafetyPage QComboBox#SafetyStateFilter { min-height: 30px; padding-left: 9px; padding-right: 8px; border-radius: 8px; background: @soft@; }
+QWidget#SafetyPage QComboBox#SafetyKindFilter:hover, QWidget#SafetyPage QComboBox#SafetyStateFilter:hover { border-color: @accent@; }
+QWidget#SafetyPage QComboBox#SafetyKindFilter:focus, QWidget#SafetyPage QComboBox#SafetyStateFilter:focus { border-color: @accent@; }
+QWidget#SafetyPage QListWidget#SafetyRegistryList { background: transparent; border: none; padding: 0px; outline: none; }
+QWidget#SafetyPage QListWidget#SafetyRegistryList::item { color: @secondary@; background: transparent; margin: 2px 0px; padding: 7px 8px; border: 1px solid transparent; border-radius: 9px; }
+QWidget#SafetyPage QListWidget#SafetyRegistryList::item:hover:!selected { background: @soft@; border-color: @border@; }
+QWidget#SafetyPage QListWidget#SafetyRegistryList::item:selected { background: @accent_soft@; color: @accent_ink@; border-color: @border@; }
+QWidget#SafetyPage QFrame#SafetyHero { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @hero_start@,stop:1 @hero_end@); border: 1px solid @border@; border-radius: 12px; }
+QWidget#SafetyPage QLabel#SafetyDetailName { color: @text@; font-size: 22px; font-weight: 700; }
+QWidget#SafetyPage QLabel#SafetyHealthState { color: @warning@; font-size: 20px; font-weight: 700; }
+QWidget#SafetyPage QFrame#SafetyAttention[attentionState="healthy"] { background: @success_soft@; border-color: @border@; }
+QWidget#SafetyPage QFrame#SafetyAttention[attentionState="healthy"] QLabel#SafetyHealthState { color: @success@; }
+QWidget#SafetyPage QFrame#SafetyAttention[attentionState="attention"] { background: @warning_soft@; border-color: @border@; }
+QWidget#SafetyPage QTabWidget#SafetyDetailTabs::pane { background: transparent; border: none; }
+QWidget#SafetyPage QTabWidget#SafetyDetailTabs QTabBar::tab { padding: 8px 12px; margin: 0px 3px 0px 0px; color: @muted@; border: none; border-bottom: 2px solid transparent; border-radius: 0px; }
+QWidget#SafetyPage QTabWidget#SafetyDetailTabs QTabBar::tab:selected { color: @accent_ink@; border-bottom: 2px solid @accent@; background: transparent; }
+QWidget#SafetyPage QTabWidget#SafetyDetailTabs QLabel#SafetyMetricValue { font-size: 18px; }
+
+/* Knowledge navigation: complete quick views and continuous topic selection. */
+QWidget#KnowledgePage QLabel#KnowledgeVaultName { background: @soft@; color: @muted@; border-radius: 7px; padding: 7px 8px; font-size: 11px; }
+QWidget#KnowledgePage QLabel#KnowledgeNavigationHeading { color: @muted@; font-size: 11px; font-weight: 600; padding: 4px 2px 0px 2px; }
+QWidget#KnowledgePage QPushButton#KnowledgeRootButton { min-height: 24px; padding: 3px; border: none; background: transparent; border-radius: 7px; }
+QWidget#KnowledgePage QPushButton#KnowledgeRootButton:hover { background: @soft@; }
+QWidget#KnowledgePage QPushButton#KnowledgeNewTopic { background: @accent_soft@; border-color: @border@; color: @accent_ink@; font-weight: 600; padding: 6px 10px; min-height: 22px; border-radius: 8px; }
+QWidget#KnowledgePage QPushButton#KnowledgeNewTopic:hover { background: @soft@; border-color: @accent@; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick { background: transparent; border: none; padding: 0px; outline: none; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick::item { color: @secondary@; margin: 0px; padding: 5px 8px; border: none; border-radius: 8px; }
+QWidget#KnowledgePage QListWidget#KnowledgeQuick::item:selected { background: @accent_soft@; color: @accent_ink@; font-weight: 600; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree { background: transparent; border: none; padding: 0px; outline: none; show-decoration-selected: 1; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree::item { color: @secondary@; min-height: 26px; padding: 5px 4px; margin: 0px; border: none; border-radius: 0px; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree::item:selected, QWidget#KnowledgePage QTreeWidget#KnowledgeTree::branch:selected { background: @accent_soft@; color: @accent_ink@; }
+QWidget#KnowledgePage QTreeWidget#KnowledgeTree::branch:hover:!selected { background: @soft@; }
+
+QWidget#KnowledgePage QWidget#KnowledgePanel[knowledgeRole="sidebar"] { background: transparent; border: none; border-radius: 0px; }
+QWidget#KnowledgePage QFrame#KnowledgeEmptyCard { background: transparent; border: none; }
+QWidget#KnowledgePage QLabel#KnowledgeEmptyTitle { font-size: 22px; font-weight: 700; color: @text@; }
+QWidget#KnowledgePage QLabel#KnowledgeEmptyDescription { font-size: 13px; color: @secondary@; padding: 2px 0px 8px 0px; }
+QWidget#KnowledgePage QLabel#KnowledgeWelcomeSteps { color: @muted@; font-size: 11px; padding-top: 12px; }
+QWidget#KnowledgePage QFrame#KnowledgeLocation { background: transparent; border: none; border-radius: 0px; }
+QWidget#KnowledgePage QLabel#KnowledgeLocationPath { color: @muted@; font-size: 11px; font-weight: 400; }
+QWidget#KnowledgePage QPushButton#KnowledgeLocationOpen { background: transparent; border: none; color: @accent_ink@; padding: 2px 4px; }
+QWidget#KnowledgePage QPushButton#KnowledgeDetailBack { background: transparent; border: none; color: @accent_ink@; padding: 3px 0px; text-align: left; }
+QWidget#KnowledgePage QTextBrowser { border: none; background: @surface@; }
+QWidget#KnowledgePage QLabel#KnowledgeVaultName { background: transparent; padding: 0px 2px; color: @muted@; }
+QWidget#KnowledgePage QLineEdit#KnowledgeCapture { background: @soft@; border-color: @border@; border-radius: 9px; padding: 7px 10px; }
+
 """

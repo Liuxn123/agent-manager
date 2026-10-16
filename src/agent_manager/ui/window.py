@@ -9,24 +9,26 @@ from uuid import uuid4
 from datetime import datetime
 
 from PySide6.QtCore import QThreadPool, QTimer, Qt, QUrl, QUrlQuery, QSize, Signal
-from PySide6.QtGui import QDesktopServices, QColor, QTextOption, QIcon
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame,
-    QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QProgressBar, QSplitter, QStackedWidget,
+from PySide6.QtGui import QDesktopServices, QTextOption, QIcon
+from PySide6.QtWidgets import (
+    QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QMainWindow,
+    QMenu, QMessageBox, QPushButton, QProgressBar, QSplitter, QStackedWidget,
     QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget, QScrollArea,
-    QTabWidget, QListWidgetItem, QSpinBox, QToolButton, QFormLayout, QSizePolicy, QComboBox, QApplication)
+    QTabWidget, QListWidgetItem, QFormLayout, QSizePolicy, QComboBox, QApplication,
+)
 
 from .. import __version__, archives
 from ..application import ApplicationService
 from ..domain import KINDS, Resource, RestorePlan, UserError
 from ..security import safe_result
 from ..storage import Store
-from .dialogs import ArchiveRestoreDialog, PasswordDialog, PlanDialog, ResourceDialog, RecordsDialog, TransferDialog, choose_path
+from .dialogs import ArchiveRestoreDialog, PasswordDialog, PlanDialog, ResourceDialog, RecordsDialog, TransferDialog
 from ..profiles import restored_resource, sources_for
 from .tasks import Worker, ReadWorker
 from .presentation import ACTION_LABELS, readable_report, readable_time, readable_size
 from .components import nav_icon, card, FlowLayout, ReadableTable
-from ..maintenance import backup_health, is_due, fingerprint, age_hours
+from ..maintenance import backup_health, is_due, fingerprint
 from ..obsidian import require_vault
 from ..storage import now
 
@@ -80,7 +82,7 @@ class ResourcePage(QWidget):
         self.page_description = description
         layout.addWidget(description)
         toolbar = QHBoxLayout()
-        self.add = button("＋ 添加工作 Agent" if kinds == ["agent"] else "＋ 添加" + title, self.add_resource, True)
+        self.add = button("＋ 添加" + title, self.add_resource, True)
         self.search = QLineEdit()
         self.search.setPlaceholderText("搜索名称或目录")
         self.search.textChanged.connect(self.refresh)
@@ -97,7 +99,6 @@ class ResourcePage(QWidget):
         toolbar.addWidget(self.edit_button)
         self.toolbar_controls = [self.add, self.search, self.selector, self.edit_button]
         layout.addLayout(toolbar)
-        self.agent_action_widgets = []
         self.observe_button = button("检查状态", lambda: self.dispatch("observe"))
         self.backup_button = button("立即备份", lambda: self.dispatch("backup"), True)
         self.verify_button = button("校验备份", lambda: self.dispatch("verify"))
@@ -108,56 +109,22 @@ class ResourcePage(QWidget):
         self.logs_button = button("网关日志", lambda: self.dispatch("logs"))
         self.search_records_button = button("搜索记录", lambda: self.window.search_records(self.selected()))
         self.page_action_widgets = [self.observe_button, self.backup_button, self.verify_button, self.restore_button]
-        if kinds == ["agent"]:
-            self.usage_button = button("Token 用量", self.show_usage)
-            self.rehearse_button = button("试一次恢复", lambda: self.window.rehearse_backup(self.selected()) if self.selected() else None)
-            self.open_agent_button = button("打开资料目录", lambda: self.dispatch("open"))
-            panel = QFrame()
-            panel.setObjectName("Card")
-            panel_layout = QVBoxLayout(panel)
-            panel_layout.setContentsMargins(14, 10, 14, 10)
-            panel_layout.setSpacing(6)
-            protection_title = QLabel("资料保护")
-            protection_title.setObjectName("SectionTitle")
-            panel_layout.addWidget(protection_title)
-            protection_actions = QHBoxLayout()
-            protection_actions.setSpacing(8)
-            for widget in (self.observe_button, self.backup_button, self.verify_button, self.restore_button):
-                protection_actions.addWidget(widget)
-            protection_actions.addStretch(1)
-            panel_layout.addLayout(protection_actions)
-            tools_title = QLabel("记录与诊断")
-            tools_title.setObjectName("SectionTitle")
-            panel_layout.addWidget(tools_title)
-            agent_tools = QHBoxLayout()
-            agent_tools.setSpacing(8)
-            for widget in (self.records_button, self.search_records_button, self.usage_button,
-                           self.rehearse_button, self.open_agent_button, self.more_button):
-                agent_tools.addWidget(widget)
-                self.agent_action_widgets.append(widget)
-            agent_tools.addStretch(1)
-            panel_layout.addLayout(agent_tools)
-            self.agent_tools_panel = panel
-            layout.addWidget(panel)
-        else:
-            actions = FlowLayout()
-            for widget in (self.observe_button, self.backup_button, self.verify_button, self.restore_button):
-                actions.addWidget(widget)
-            if kinds == ["hermes_local"]:
-                self.versions_button = button("备份提交", lambda: self.dispatch("versions"))
-                self.open_resource_button = button("打开 Hermes 目录", lambda: self.dispatch("open"))
-                actions.addWidget(self.library_button)
-                actions.addWidget(self.versions_button)
-                actions.addWidget(self.open_resource_button)
-            elif kinds == ["hermes_server"]:
-                self.restart_button = button("重启共享网关", lambda: self.dispatch("restart"))
-                self.profiles_button = button("查看服务器 Profiles", self.inspect_profiles)
-                actions.addWidget(self.logs_button)
-                actions.addWidget(self.restart_button)
-                actions.addWidget(self.profiles_button)
-            actions.addWidget(self.more_button)
-            self.page_action_widgets.extend(actions.itemAt(i).widget() for i in range(actions.count()) if actions.itemAt(i).widget())
-            layout.addLayout(actions)
+        actions = FlowLayout()
+        for widget in (self.observe_button, self.backup_button, self.verify_button, self.restore_button):
+            actions.addWidget(widget)
+        if kinds == ["hermes_local"]:
+            self.versions_button = button("备份提交", lambda: self.dispatch("versions"))
+            self.open_resource_button = button("打开 Hermes 目录", lambda: self.dispatch("open"))
+            actions.addWidget(self.library_button)
+            actions.addWidget(self.versions_button)
+            actions.addWidget(self.open_resource_button)
+        elif kinds == ["hermes_server"]:
+            self.profiles_button = button("查看服务器 Profiles", self.inspect_profiles)
+            actions.addWidget(self.logs_button)
+            actions.addWidget(self.profiles_button)
+        actions.addWidget(self.more_button)
+        self.page_action_widgets.extend(actions.itemAt(i).widget() for i in range(actions.count()) if actions.itemAt(i).widget())
+        layout.addLayout(actions)
         self.metrics = []
         self.metric_panels = []
         if self.compact:
@@ -235,14 +202,6 @@ class ResourcePage(QWidget):
             self.window.submit(resource, "读取服务器 Profiles", lambda context: self.window.service.action(resource, "profiles", context),
                                lambda report: TextReportDialog(self.window, "服务器 Profiles", {"text": readable_report(report), "note": "每个 Profile 独立保存会话和配置。编辑登记时核对运行目录与备份仓库。"}).exec())
 
-    def show_usage(self) -> None:
-        resource = self.selected()
-        if resource:
-            from ..token_usage import read_usage
-            from .library import TextReportDialog
-            self.window.submit(resource, resource.name + " · 读取 Token 用量", lambda context: read_usage(resource, context),
-                               lambda report: TextReportDialog(self.window, "本地 Token 用量", {"text": readable_report(report), "note": "手动读取本地用量字段；不估算费用、不启动后台监控。"}).exec())
-
     def refresh(self) -> None:
         selected = self.selected()
         query = self.search.text().strip().casefold()
@@ -278,7 +237,7 @@ class ResourcePage(QWidget):
             self.selector.blockSignals(False)
         enabled = bool(resource and not self.window.is_busy(resource.id))
         for widget in [self.observe_button, self.backup_button, self.verify_button, self.restore_button, self.more_button,
-                       self.library_button, self.logs_button, self.search_records_button, *self.agent_action_widgets]:
+                       self.library_button, self.logs_button, self.search_records_button]:
             widget.setEnabled(enabled)
         if not resource:
             self.details.setPlainText("选择一个资源，查看状态和可用操作。")
@@ -291,10 +250,6 @@ class ResourcePage(QWidget):
         if not resource.options.get("manage_git"):
             capabilities = capabilities - {"git_pull"}
         payload = {"名称": resource.name, "类型": KINDS[resource.kind], "可用操作": "、".join(ACTION_LABELS.get(action, action) for action in sorted(capabilities) if action != "open_vault" or resource.kind == "vault")}
-        if resource.kind == "agent":
-            payload["使用的 Agent"] = resource.options.get("engine", "其他 Agent")
-            payload["会备份哪些资料"] = [{"资料": item["label"], "文件夹": item["path"]} for item in sources_for(resource)]
-            payload["换电脑怎么做"] = "立即备份 → 复制 .amb 文件和独立保存的口令 → 新电脑打开“备份与换电脑” → 从备份文件恢复。"
         if observation is not None:
             payload["最近检查结果"] = observation
             payload["提示"] = "最近结果仅代表执行时观测；点击检查状态获取新结果。"
@@ -322,21 +277,6 @@ class ResourcePage(QWidget):
                 summary += f"<h3>Hermes 快照</h3><p>{counts.get('sessions', '—')} 个会话 · {counts.get('messages', '—')} 条消息</p><p>{counts.get('facts', '—')} 条事实记忆</p>"
             else:
                 summary += "<h3>Hermes 快照</h3><p>运行检查后显示会话、消息和事实记忆数量。</p>"
-        elif resource.kind == "agent":
-            checked_paths = {item.get("label"): item.get("exists") for item in (observation or {}).get("components", [])}
-            source_rows = []
-            for item in sources_for(resource):
-                exists = checked_paths.get(item["label"])
-                path_state = "目录存在" if exists is True else "未找到" if exists is False else "尚未检查"
-                source_rows.append(
-                    "<p><b>" + html.escape(item["label"]) + "</b> · " + path_state +
-                    "<br><span style='color:#687594'>" + html.escape(item["path"]) + "</span></p>"
-                )
-            summary += "<h3>本地资料状态</h3>" + "".join(source_rows)
-            summary += "<p>运行状态：" + html.escape(str((observation or {}).get("state", "尚未检查")))
-            if "external_process_count" in (observation or {}):
-                summary += " · 识别到 " + html.escape(str(observation["external_process_count"])) + " 个相关进程"
-            summary += "</p>"
         else:
             summary += "<h3>项目位置</h3><p>" + html.escape(str(resource.options.get("path", ""))) + "</p>"
         tasks = self.window.store.task_summaries(limit=5, resource_id=resource.id)
@@ -358,9 +298,6 @@ class ResourcePage(QWidget):
         )
         self.details.setHtml(overview)
         self.populate_paths(resource)
-        if (hasattr(self.window, "safety_kind") and hasattr(self.window, "update_safety_workspace")
-                and self.window.resource_pages[self.window.safety_kind.currentIndex()] is self):
-            self.window.update_safety_workspace()
 
     def show_paths(self) -> None:
         self.tabs.setCurrentIndex(1)
@@ -380,11 +317,8 @@ class ResourcePage(QWidget):
         title.setWordWrap(True)
         title.setObjectName("SectionTitle")
         self.paths_layout.addWidget(title)
-        if resource.kind == "agent":
-            paths = [(item["label"], item["path"]) for item in sources_for(resource)]
-        else:
-            paths = [(label, str(resource.options.get(key, ""))) for key, label in
-                     (("profile_home", "当前 Profile 资料"), ("home", "运行 / 原生备份根目录"), ("path", "项目目录"), ("backup_repo", "备份仓库"), ("workspace", "Workspace"), ("knowledge_repo", "知识库"))]
+        paths = [(label, str(resource.options.get(key, ""))) for key, label in
+                 (("profile_home", "当前 Profile 资料"), ("home", "运行 / 原生备份根目录"), ("path", "项目目录"), ("backup_repo", "备份仓库"), ("workspace", "Workspace"), ("knowledge_repo", "知识库"))]
         for label, path in paths:
             if not path:
                 continue
@@ -425,9 +359,9 @@ class ResourcePage(QWidget):
             menu.addAction("试一次恢复（临时目录）", lambda: self.window.rehearse_backup(resource))
         menu.addSeparator()
         for action, label in labels.items():
-            if resource.kind in {"hermes_local", "hermes_server", "agent"}:
+            if resource.kind in {"hermes_local", "hermes_server"}:
                 continue
-            if action in {"start", "stop"} and resource.kind in {"hermes_local", "agent"}:
+            if action in {"start", "stop"} and resource.kind == "hermes_local":
                 continue
             if action in capabilities and (action != "open_vault" or resource.kind == "vault") and (action != "git_pull" or resource.options.get("manage_git")):
                 menu.addAction(label, lambda action=action: self.dispatch(action))
@@ -438,7 +372,7 @@ class ResourcePage(QWidget):
 
 class MainWindow(QMainWindow):
     task_completed = Signal(str, str)
-    TODAY, PLAN, PROJECT, LIBRARY, AGENT, ENVIRONMENT, SAFETY, SETTINGS = range(8)
+    TODAY, PLAN, PROJECT, LIBRARY, SAFETY, SETTINGS = range(6)
 
     def __init__(self, store: Store) -> None:
         super().__init__()
@@ -452,8 +386,6 @@ class MainWindow(QMainWindow):
         self.pool.setMaxThreadCount(3)
         self.jobs: dict[str, tuple[Worker, str, object]] = {}
         self.closed = False
-        self.agent_status_worker = None
-        self.agent_status_key = None
         self.resource_states: dict[str, str] = {r.id: "最近已检测" for r in store.resources() if store.evidence("observe:" + r.id)}
         self.observations: dict[str, dict] = {r.id: store.evidence("observe:" + r.id) for r in store.resources() if store.evidence("observe:" + r.id)}
         self.automatic_retry: dict[str, float] = {}
@@ -497,7 +429,7 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("Navigation")
         self.navigation.setIconSize(QSize(20, 20))
-        for index, label in zip((0, 8, 3, 6, 4, 2, 5, 7), ("今日工作台", "计划管理", "项目管理", "知识库", "Agent 管理", "电脑与环境", "数据安全", "设置")):
+        for index, label in zip((0, 8, 3, 6, 5, 7), ("今日工作台", "计划管理", "项目管理", "知识库", "数据安全", "设置")):
             self.navigation.addItem(QListWidgetItem(nav_icon(index, "#a4b8d4"), label))
         sidebar_layout.addWidget(self.navigation, 1)
         help_button = button("使用说明", self.show_guide)
@@ -517,17 +449,6 @@ class MainWindow(QMainWindow):
         topbar_layout = QHBoxLayout(topbar)
         topbar_layout.setContentsMargins(24, 12, 24, 12)
         topbar_layout.setSpacing(12)
-        self.global_search = QLineEdit()
-        self.global_search.setObjectName("GlobalSearch")
-        self.global_search.setPlaceholderText("搜索任务、项目、Agent 或知识库资料…")
-        self.global_search.setClearButtonEnabled(True)
-        search_icon = Path(__file__).resolve().parents[1] / "assets/ui/search.svg"
-        self.global_search.addAction(QIcon(str(search_icon)), QLineEdit.ActionPosition.LeadingPosition)
-        self.global_search.setAccessibleName("搜索当前模块")
-        self.global_search.setMaximumWidth(540)
-        self.global_search.setMinimumWidth(250)
-        self.global_search.returnPressed.connect(self.search_current_module)
-        topbar_layout.addWidget(self.global_search, 1)
         topbar_layout.addStretch(1)
         today = datetime.now()
         self.global_date = QLabel(today.strftime("%Y年%m月%d日") + "  周" + "一二三四五六日"[today.weekday()])
@@ -556,13 +477,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(shell)
         self.statusBar().setSizeGripEnabled(False)
         self.statusBar().hide()
-        self.build_overview()
         self.resource_pages: list[ResourcePage] = []
         for title, subtitle, kinds in [
             ("本地 Hermes", "管理运行目录和现有恢复仓库，执行备份、校验与完整恢复。", ["hermes_local"]),
             ("服务器 Hermes", "按需连接服务器，管理网关、服务器备份与空目录恢复。", ["hermes_server"]),
-            ("本地项目", "管理代码、知识库与 Obsidian；加密备份工作文件和附件。", ["project", "vault"]),
-            ("其他工作 Agent", "备份 Codex、WorkBuddy 等的项目文件和本地记录；换电脑时一起恢复。", ["agent"])]:
+            ("本地项目", "管理代码、知识库与 Obsidian；加密备份工作文件和附件。", ["project", "vault"])]:
             page = ResourcePage(self, title, subtitle, kinds)
             self.resource_pages.append(page)
             if kinds == ["project", "vault"]:
@@ -586,12 +505,6 @@ class MainWindow(QMainWindow):
         self.schedule_timer = QTimer(self)
         self.schedule_timer.setInterval(60_000)
         # Legacy backup scheduler is intentionally inactive; data safety now tracks local files.
-        self.agent_status_timer = QTimer(self)
-        self.agent_status_timer.setInterval(30_000)
-        self.agent_status_timer.timeout.connect(self.refresh_agent_activity)
-        if self.navigation.currentRow() == self.TODAY:
-            self.agent_status_timer.start()
-            QTimer.singleShot(0, self.refresh_agent_activity)
         QTimer.singleShot(0, self.import_legacy_tasks)
         if store.setting("project_workspace", ""):
             QTimer.singleShot(0, self.project_page.refresh)
@@ -612,204 +525,34 @@ class MainWindow(QMainWindow):
 
     def organize_workbench(self):
         """Build the application pages and the local file tracking workspace."""
-        from .workbench import TodayPage, CatalogPage, AgentPage
+        from .workbench import TodayPage, CatalogPage
         from .knowledge import KnowledgePage
-        from .environment import EnvironmentPage
+        self.settings_page = self.stack.widget(self.stack.count() - 1)
         old = [self.stack.widget(i) for i in range(self.stack.count())]
         for page in old:
             self.stack.removeWidget(page)
         self.today_page = TodayPage(self)
         from .planning import PlanningPage
         self.planning_page = PlanningPage(self, self.today_page)
-        self.agent_page = AgentPage(self)
         self.knowledge_page = KnowledgePage(self)
         self.catalog_page = CatalogPage(self)
-        self.environment_page = EnvironmentPage(self)
-        from .file_tracking import FileTrackingPage
-        self.safety_tabs = QTabWidget()
-        self.safety_tabs.setObjectName("SafetyTabs")
-        self.file_tracking_page = FileTrackingPage(self)
-        self.safety_tabs.addTab(self.file_tracking_page, "文件追踪")
-        safety = self.safety_tabs
+        from .safety import SafetyPage
+        self.safety_page = SafetyPage(self)
+        safety = self.safety_page
         self.activity_tabs.setTabVisible(0, False)
         self.activity_tabs.setCurrentIndex(1)
         for page in (self.today_page, self.planning_page, self.project_page, self.knowledge_page,
-                     self.agent_page, self.environment_page, safety, old[7]):
+                     safety, self.settings_page):
             self.stack.addWidget(page)
-        self.update_safety_resource_choices()
-
-    def select_safety_kind(self, index):
-        self.safety_resources.setCurrentIndex(index)
-        self.update_safety_resource_choices()
-
-    def select_safety_resource(self, row):
-        if not hasattr(self, "safety_resources") or row < 0:
-            return
-        page = self.resource_pages[self.safety_kind.currentIndex()]
-        identity = self.safety_resource_choice.itemData(row)
-        selected_row = next((i for i, resource in enumerate(page.rows) if resource.id == identity), -1)
-        if selected_row >= 0:
-            page.resources_table.selectRow(selected_row)
-            page.selection_changed()
-
-    def update_safety_resource_choices(self):
-        if not hasattr(self, "safety_resource_choice"):
-            return
-        index = self.safety_kind.currentIndex()
-        page = self.resource_pages[index]
-        selected = page.selected()
-        combo = self.safety_resource_choice
-        combo.blockSignals(True)
-        combo.clear()
-        for resource in page.rows:
-            combo.addItem(resource.name, resource.id)
-        selected_index = next((i for i, resource in enumerate(page.rows) if selected and resource.id == selected.id), 0 if page.rows else -1)
-        combo.setCurrentIndex(selected_index)
-        combo.blockSignals(False)
-        combo.setEnabled(bool(page.rows))
-        self.safety_edit_button.setEnabled(bool(selected))
-        self.safety_empty.setVisible(not page.rows)
-        self.safety_resources.setVisible(bool(page.rows))
-        self.safety_resources.setCurrentIndex(index)
-        self.update_safety_workspace()
-
-    def select_safety_job(self):
-        row = self.safety_jobs_table.currentRow()
-        item = self.safety_jobs_table.item(row, 0) if row >= 0 else None
-        identity = item.data(Qt.ItemDataRole.UserRole) if item else None
-        resource = next((candidate for candidate in self.store.resources() if candidate.id == identity), None)
-        if resource:
-            self.safety_tabs.setCurrentIndex(0)
-
-    def open_safety_job_details(self, *_):
-        self.select_safety_job()
-        if self.safety_resource_choice.currentIndex() >= 0:
-            self.safety_tabs.setCurrentIndex(4)
-
-    def safety_rehearse_selected(self):
-        resource = self.resource_pages[self.safety_kind.currentIndex()].selected()
-        if resource:
-            self.rehearse_backup(resource)
-
-    def select_safety_kind_for_resource(self, resource):
-        index = {"hermes_local": 0, "hermes_server": 1, "project": 2, "vault": 2, "agent": 3}[resource.kind]
-        self.safety_kind.setCurrentIndex(index)
-        self.update_safety_resource_choices()
-        combo_index = self.safety_resource_choice.findData(resource.id)
-        if combo_index >= 0:
-            self.safety_resource_choice.setCurrentIndex(combo_index)
-
-    def add_safety_resource(self):
-        self.resource_pages[self.safety_kind.currentIndex()].add_resource()
-
-    def edit_safety_resource(self):
-        self.edit_resource(self.resource_pages[self.safety_kind.currentIndex()].selected())
-
-    def safety_dispatch(self, action):
-        resource = self.resource_pages[self.safety_kind.currentIndex()].selected()
-        if resource:
-            self.perform(resource, action)
-
-    def safety_more_actions(self):
-        page = self.resource_pages[self.safety_kind.currentIndex()]
-        resource = page.selected()
-        if not resource:
-            return
-        menu = QMenu(self)
-        # Build actions explicitly so every item reuses the established adapter callback.
-        def action(title, callback, enabled=True):
-            item = menu.addAction(title)
-            item.setEnabled(enabled)
-            item.triggered.connect(callback)
-        if resource.kind == "hermes_local":
-            action("浏览会话", lambda: self.perform(resource, "library"))
-            action("查看备份提交", lambda: self.perform(resource, "versions"))
-            action("打开 Hermes 目录", lambda: self.perform(resource, "open"))
-        elif resource.kind == "hermes_server":
-            action("查看网关日志", lambda: self.perform(resource, "logs"))
-            action("重启共享网关…", lambda: self.perform(resource, "restart"))
-            action("查看服务器 Profiles", page.inspect_profiles)
-        elif resource.kind == "agent":
-            action("浏览本地记录", lambda: self.perform(resource, "records"))
-            action("搜索记录", lambda: self.search_records(resource))
-            action("Token 用量", page.show_usage)
-            action("恢复演练", lambda: self.rehearse_backup(resource))
-            action("打开资料目录", lambda: self.perform(resource, "open"))
-        else:
-            action("恢复演练", lambda: self.rehearse_backup(resource))
-            if resource.kind == "vault":
-                action("在 Obsidian 打开", lambda: self.perform(resource, "open_vault"))
-            if resource.options.get("manage_git"):
-                action("Git 快进拉取…", lambda: self.perform(resource, "git_pull"))
-        menu.addSeparator()
-        action("编辑登记", lambda: self.edit_resource(resource))
-        action("移除登记…", lambda: self.remove_resource(resource))
-        menu.exec(self.safety_more_button.mapToGlobal(self.safety_more_button.rect().bottomLeft()))
-
-    def update_safety_workspace(self):
-        if not hasattr(self, "safety_detail_metric_values"):
-            return
-        index = self.safety_kind.currentIndex()
-        page = self.resource_pages[index]
-        resource = page.selected()
-        buttons = (self.safety_observe_button, self.safety_backup_button, self.safety_verify_button, self.safety_restore_button, self.safety_more_button)
-        if not resource:
-            for value, note in self.safety_detail_metric_values:
-                value.setText("—")
-                note.setText("选择或登记一项资料")
-            for widget in buttons:
-                widget.setEnabled(False)
-            self.safety_quick_verify.setEnabled(False)
-            self.safety_quick_rehearse.setEnabled(False)
-            self.safety_edit_button.setEnabled(False)
-            return
-        capabilities = self.service.registry.get(resource).capabilities
-        busy = self.is_busy(resource.id)
-        health = backup_health(self.store, resource, self.service.backup_root())
-        for widget, capability in zip(buttons[:4], ("observe", "backup", "verify", "restore")):
-            widget.setEnabled(capability in capabilities and not busy)
-        buttons[4].setEnabled(not busy)
-        self.safety_quick_verify.setEnabled("verify" in capabilities and not busy)
-        self.safety_quick_rehearse.setEnabled(resource.kind not in {"hermes_local", "hermes_server"}
-                                               and bool(health.get("source"))
-                                               and not busy)
-        self.safety_edit_button.setEnabled(not busy)
-        observation = self.observations.get(resource.id, {})
-        recovery = "已演练" if health.get("rehearsed") else "已校验" if health.get("verified") else "尚待验证"
-        backup_time = readable_time(health.get("created_at") or "尚无备份")
-        if resource.kind == "hermes_local":
-            counts = observation.get("counts", {})
-            scope = f"{counts.get('sessions')} 个会话 · {counts.get('messages', 0)} 条消息" if counts else "运行检查后显示会话数"
-        elif resource.kind == "hermes_server":
-            scope = "服务器 Profiles 与 Hermes 运行资料"
-        elif resource.kind == "agent":
-            scope = f"{len(sources_for(resource))} 个记录目录"
-        else:
-            scope = Path(resource.options.get("path", "")).name or "已登记项目资料"
-        run_state = observation.get("state") or ("已连接" if observation.get("connected") else "尚未检查")
-        if resource.kind == "hermes_local" and observation:
-            run_state = "运行正常" if observation.get("running") or observation.get("state") == "running" else "已检查"
-        elif resource.kind == "hermes_server" and observation:
-            run_state = "连接正常" if observation.get("connected") else "连接异常"
-        metric_data = ((health["state"], "上次备份：" + backup_time),
-                       (recovery, "最近备份完整性" if health.get("verified") or health.get("rehearsed") else "建议创建备份后进行校验"),
-                       (run_state, "点击“检查状态”读取最新结果" if not observation else readable_time(observation.get("observed_at", "已检查"))),
-                       (scope, str(resource.options.get("home", "")) if resource.kind.startswith("hermes") else ""))
-        for (value, note), (headline, detail) in zip(self.safety_detail_metric_values, metric_data):
-            value.setText(str(headline))
-            note.setText(str(detail))
 
     def open_safety_resource(self, resource):
         self.navigation.setCurrentRow(self.SAFETY)
-        self.safety_tabs.setCurrentIndex(0)
-        # Legacy callers now land on the local file tracking page.
+        self.safety_page.show_overview(resource)
 
     def open_backup_history(self):
         self.navigation.setCurrentRow(self.SAFETY)
-        self.safety_tabs.setCurrentIndex(0)
+        self.safety_page.show_restore()
 
-    def safety_tab_changed(self, index):
-        self.update_task_timer()
 
     def open_project_identity(self, identity):
         from ..storage import now
@@ -863,88 +606,6 @@ class MainWindow(QMainWindow):
             self.settings_status_update()
         self.statusBar().showMessage("Obsidian 知识库路径已保存")
 
-    def build_overview(self) -> None:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setSpacing(18)
-        title = QLabel("资料保护概览")
-        title.setObjectName("Title")
-        layout.addWidget(title)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        body.setObjectName("DashboardBody")
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 8, 0)
-        body_layout.setSpacing(18)
-        hero = QFrame()
-        hero.setObjectName("Hero")
-        hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(26, 22, 26, 22)
-        words = QVBoxLayout()
-        heading = QLabel("把工作留住，随时接着做")
-        heading.setObjectName("HeroTitle")
-        words.addWidget(heading)
-        self.overview_info = QLabel("Hermes · 项目 · 工作 Agent")
-        self.overview_info.setObjectName("HeroNote")
-        self.overview_info.setWordWrap(True)
-        words.addWidget(self.overview_info)
-        hero_layout.addLayout(words, 1)
-        hero_layout.addWidget(button("备份 Hermes", self.backup_main_hermes, True))
-        body_layout.addWidget(hero)
-        grid = QGridLayout()
-        self.count_labels: list[QLabel] = []
-        for index, name in enumerate(["本地 Hermes", "服务器", "项目与知识库", "其他 Agent"]):
-            panel, value, note = card(name, "0", "已登记资源")
-            self.count_labels.append(value)
-            grid.addWidget(panel, 0, index)
-        body_layout.addLayout(grid)
-        actions = QHBoxLayout()
-        actions.addWidget(button("检查全部状态", self.observe_all))
-        actions.addWidget(button("查看最近备份", self.open_backup_history))
-        actions.addWidget(button("换电脑恢复", self.open_backup_history))
-        actions.addStretch()
-        body_layout.addLayout(actions)
-        row = QHBoxLayout()
-        section = QLabel("资料保护")
-        section.setObjectName("SectionTitle")
-        row.addWidget(section)
-        row.addStretch()
-        self.health_hint = QLabel("")
-        self.health_hint.setObjectName("Subtitle")
-        row.addWidget(self.health_hint)
-        body_layout.addLayout(row)
-        self.health_table = table(["资料", "最近备份", "保护状态", "连接 / 运行状态"])
-        self.health_table.setMinimumHeight(205)
-        self.health_table.setMaximumHeight(340)
-        self.health_table.doubleClicked.connect(self.open_dashboard_resource)
-        body_layout.addWidget(self.health_table)
-        panels = QHBoxLayout()
-        self.pending_items = QListWidget()
-        self.latest_backups = QListWidget()
-        for title, view in [("待处理事项", self.pending_items), ("Agent 实时运行", self.latest_backups)]:
-            panel = QFrame()
-            panel.setObjectName("Card")
-            pane = QVBoxLayout(panel)
-            heading = QLabel(title)
-            heading.setObjectName("SectionTitle")
-            pane.addWidget(heading)
-            if view is self.latest_backups:
-                self.agent_status_hint = QLabel("正在读取登记 Agent 的进程状态…")
-                self.agent_status_hint.setObjectName("Subtitle")
-                pane.addWidget(self.agent_status_hint)
-            view.setWordWrap(True)
-            view.setObjectName("ActionList")
-            view.setMinimumHeight(110)
-            view.setMaximumHeight(140)
-            view.itemDoubleClicked.connect(self.open_dashboard_item)
-            pane.addWidget(view)
-            panels.addWidget(panel, 1)
-        body_layout.insertLayout(3, panels)
-        body_layout.addStretch()
-        scroll.setWidget(body)
-        layout.addWidget(scroll, 1)
-        self.stack.addWidget(page)
 
     def build_backups(self) -> None:
         page = QWidget()
@@ -1147,198 +808,10 @@ class MainWindow(QMainWindow):
     def is_busy(self, identity: str) -> bool:
         return any(resource_id == identity for _, resource_id, _ in self.jobs.values())
 
-    def backup_main_hermes(self) -> None:
-        resource = next((r for r in self.store.resources() if r.kind == "hermes_local"), None)
-        if resource:
-            self.perform(resource, "backup")
-        else:
-            self.add_resource("hermes_local")
-
-    def observe_all(self) -> None:
-        for resource in self.store.resources():
-            if not self.is_busy(resource.id):
-                self.perform(resource, "observe")
-
     def refresh_dashboard(self) -> None:
-        if not hasattr(self, "health_table"):
-            return
-        priority = {"hermes_local": 0, "hermes_server": 1, "agent": 2, "project": 3, "vault": 4}
-        self.dashboard_resources = sorted(self.store.resources(), key=lambda resource: priority[resource.kind])
-        self.health_table.setRowCount(len(self.dashboard_resources))
-        attention = 0
-        health_by_id = {}
-        for row, resource in enumerate(self.dashboard_resources):
-            health = backup_health(self.store, resource, self.service.backup_root())
-            health_by_id[resource.id] = health
-            if health["state"] not in {"已校验", "已演练"}:
-                attention += 1
-            observation = self.observations.get(resource.id) or self.store.evidence("observe:" + resource.id)
-            state = "尚未检测"
-            if self.is_busy(resource.id):
-                state = "任务进行中"
-            elif resource.kind == "hermes_server" and observation:
-                state = "网关正常" if observation.get("connected") and observation.get("service_state") == "active" else "请检查连接 / 网关"
-            elif resource.kind == "agent" and observation:
-                state = "目录需重选" if not all(item.get("exists") for item in observation.get("components", [])) else "运行中" if observation.get("external_process_count") or observation.get("pid") else "未发现运行进程"
-            elif observation.get("error"):
-                state = "请检查目录 / 环境"
-            elif observation:
-                state = "已检测"
-            observed_age = age_hours(observation.get("observed_at"))
-            if observed_age is not None and observed_age > 1:
-                state += "（历史）"
-            values = [resource.name, readable_time(health.get("created_at") or "—"), health["state"], state]
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setToolTip(value + ("\n最近检测：" + readable_time(observation["observed_at"]) if column == 3 and observation.get("observed_at") else ""))
-                if column == 2:
-                    item.setForeground(QColor("#39937b" if health["state"] in {"已校验", "已演练"} else "#b58136"))
-                self.health_table.setItem(row, column, item)
-        self.health_hint.setText(f"{attention} 项待备份或验证 · 双击查看")
-        self.overview_info.setText(f"{len(self.dashboard_resources)} 项资料已登记 · {'便携模式，随 U 盘带走' if self.store.portable_root else '所有参数保存在本机'}")
-        self.pending_items.clear()
-        for resource in self.dashboard_resources:
-            health = health_by_id[resource.id]
-            tasks = self.store.task_summaries(limit=1, resource_id=resource.id)
-            failed = bool(tasks and tasks[0]["state"] in {"failed", "interrupted"})
-            reason = ""
-            action_label = ""
-            action = ""
-            if failed:
-                reason, action_label, action = "最近操作失败或中断", "查看记录", "activity"
-            elif health["state"] not in {"已校验", "已演练"}:
-                reason, action_label, action = {
-                    "未备份": ("没有可恢复副本", "立即备份", "backup"),
-                    "已过期": ("备份超过 48 小时，建议更新", "立即备份", "backup"),
-                    "待校验": ("备份尚未验证可用", "校验备份", "verify"),
-                    "备份已移走": ("最近备份文件已不在原位置", "查看资料", "resource"),
-                    "快照读取失败": ("Hermes 快照无法读取", "查看资料", "resource"),
-                }.get(health["state"], ("检查资料保护状态", "查看资料", "resource"))
-            if reason:
-                # The custom row widget below renders both strings; keeping text
-                # on the QListWidgetItem would paint a second copy underneath it.
-                item = QListWidgetItem()
-                item.setData(Qt.ItemDataRole.UserRole, (resource.id, action))
-                item.setToolTip(reason)
-                item.setSizeHint(QSize(320, 48))
-                self.pending_items.addItem(item)
-                row_widget = QWidget(self.pending_items)
-                row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(7, 2, 7, 2)
-                row_layout.setSpacing(10)
-                text_layout = QVBoxLayout()
-                text_layout.setContentsMargins(0, 0, 0, 0)
-                name_label = QLabel(resource.name)
-                name_label.setStyleSheet("font-weight: 600;")
-                reason_label = QLabel(reason)
-                reason_label.setObjectName("Subtitle")
-                text_layout.addWidget(name_label)
-                text_layout.addWidget(reason_label)
-                row_layout.addLayout(text_layout, 1)
-                if action == "backup":
-                    callback = lambda checked=False, resource=resource: self.perform(resource, "backup")
-                elif action == "verify":
-                    callback = lambda checked=False, resource=resource, source=health.get("source", ""): self.perform(resource, "verify", source)
-                elif action == "activity":
-                    callback = lambda checked=False, resource=resource: self.show_resource_activity(resource)
-                else:
-                    callback = lambda checked=False, resource=resource: self.open_dashboard_resource(
-                        self.health_table.model().index(self.dashboard_resources.index(resource), 0))
-                action_button = button(action_label, callback, action == "backup")
-                action_button.setMinimumWidth(86)
-                action_button.setToolTip("直接打开对应操作")
-                row_layout.addWidget(action_button)
-                self.pending_items.setItemWidget(item, row_widget)
-        if not self.pending_items.count():
-            self.pending_items.addItem("当前没有待处理事项。")
-        self.dashboard_health = [(r, health_by_id[r.id]) for r in self.dashboard_resources]
         if hasattr(self, "today_page"):
             self.today_page.refresh_attention()
         # Process polling has its own timer; document reads must not trigger it.
-
-    def refresh_agent_activity(self) -> None:
-        page = self.navigation.currentRow()
-        if self.closed or self.agent_status_worker is not None or page != self.TODAY:
-            return
-        resources = [resource for resource in self.store.resources() if resource.kind == "agent"]
-        adapters = {resource.id: self.service.registry.get(resource) for resource in resources}
-        key = [(r.id, r.to_dict()) for r in resources]
-        def read(cancel):
-            process_ids = next(iter(adapters.values())).external_pids_many(resources, cancel) if resources else {}
-            return self.agent_activity_rows(resources, adapters, process_ids)
-        worker = ReadWorker(read)
-        self.agent_status_worker = worker
-        def finished(rows):
-            self.agent_status_worker = None
-            if self.closed:
-                return
-            current = [(r.id, r.to_dict()) for r in self.store.resources() if r.kind == "agent"]
-            if rows is None:
-                if hasattr(self, "today_page"):
-                    self.today_page.agent_status_hint.setText("Agent 运行状态暂不可读取；可在 Agent 页查看登记信息。")
-            elif current == key:
-                self.show_agent_activity(rows)
-            else:
-                self.refresh_agent_activity()
-        worker.signals.finished.connect(finished)
-        self.pool.start(worker, -1)
-
-    @staticmethod
-    def agent_activity_rows(resources, adapters, process_ids):
-        rows = []
-        for resource in resources:
-            try:
-                adapter = adapters[resource.id]
-                pids = process_ids.get(resource.id, [])
-                owned = adapter.is_running(resource)
-                components = sources_for(resource)
-                missing = [item["label"] for item in components if not item["path"] or not Path(item["path"]).is_dir()]
-            except (OSError, UserError, ValueError):
-                pids, owned, missing = [], False, ["无法读取登记目录"]
-            running = owned or bool(pids)
-            if missing:
-                detail = "资料目录需检查：" + "、".join(missing)
-                priority = 1
-            elif running:
-                detail = ("本工具启动" if owned else "检测到运行进程") + (f" · PID {', '.join(map(str, pids[:3]))}" if pids else "")
-                priority = 0
-            else:
-                detail = "未检测到运行进程 · 资料目录正常"
-                priority = 2
-            rows.append((priority, resource.name.casefold(), resource, running, detail))
-        rows.sort(key=lambda entry: (entry[0], entry[1]))
-        return rows
-
-    def show_agent_activity(self, rows) -> None:
-        key = [(r.id, r.name, running, detail) for _, _, r, running, detail in rows]
-        if key != self.agent_status_key:
-            self.agent_status_key = key
-            if hasattr(self, "today_page"):
-                self.today_page.render_agent_activity(rows)
-
-    def open_dashboard_item(self, item) -> None:
-        target = item.data(Qt.ItemDataRole.UserRole)
-        if not target:
-            return
-        resource = next((r for r in self.dashboard_resources if r.id == target[0]), None)
-        if resource:
-            if target[1] == "backup":
-                self.open_backup_history()
-                row = next((index for index, (owner, _) in enumerate(self.backup_rows) if owner.id == resource.id), None)
-                if row is not None:
-                    self.backup_table.selectRow(row)
-            elif target[1] == "running":
-                self.open_dashboard_resource(self.health_table.model().index(self.dashboard_resources.index(resource), 0))
-            elif target[1] == "resource":
-                self.open_dashboard_resource(self.health_table.model().index(self.dashboard_resources.index(resource), 0))
-            elif target[1]:
-                self.show_resource_activity(resource)
-            else:
-                self.open_dashboard_resource(self.health_table.model().index(self.dashboard_resources.index(resource), 0))
-
-    def open_dashboard_resource(self, index) -> None:
-        resource = self.dashboard_resources[index.row()]
-        self.open_safety_resource(resource)
 
     def run_automatic_backup(self) -> None:
         if self.jobs:
@@ -1364,7 +837,9 @@ class MainWindow(QMainWindow):
                 return
         try:
             self.service.secrets.unlock(password)
+            self.service.common_password = self.service.secrets.get("common:backup") or ""
             self.refresh_vault_status()
+            self.refresh_common_password()
             self.statusBar().showMessage("便携口令库已解锁；关闭程序后自动锁定")
         except UserError as exc:
             QMessageBox.warning(self, "未解锁", str(exc))
@@ -1374,7 +849,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "任务运行中", "请在任务结束后锁定口令库。")
             return
         self.service.secrets.lock()
+        self.service.common_password = ""
         self.refresh_vault_status()
+        self.refresh_common_password()
         self.statusBar().showMessage("便携口令库已锁定")
 
     def rehearse_selected_backup(self) -> None:
@@ -1407,8 +884,8 @@ class MainWindow(QMainWindow):
         SearchDialog(self, resource).exec()
 
     def refresh_resources(self) -> None:
-        resources = self.store.resources()
-        self.agent_page.refresh(resources=resources)
+        if hasattr(self, "safety_page"):
+            self.safety_page.refresh()
 
     def add_resource(self, kind: str) -> None:
         dialog = ResourceDialog(self, kind)
@@ -1453,8 +930,8 @@ class MainWindow(QMainWindow):
         if persist_result:
             self.refresh_resources()
         self.update_task_timer()
-        if self.navigation.currentRow() == self.SAFETY and self.safety_tabs.currentIndex() == 2 and self.activity_tabs.currentIndex() == 1:
-            self.refresh_tasks()
+        if self.navigation.currentRow() == self.SAFETY:
+            self.safety_page.refresh()
         return identity
 
     def task_finished(self, identity: str, result, state: str) -> None:
@@ -1480,8 +957,8 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(bool(self.jobs))
         if entry[0].persist_result:
             self.refresh_resources()
-        if self.navigation.currentRow() == self.SAFETY and self.safety_tabs.currentIndex() == 2 and self.activity_tabs.currentIndex() == 1:
-            self.refresh_tasks()
+        if self.navigation.currentRow() == self.SAFETY:
+            self.safety_page.refresh()
         self.update_task_timer()
         self.statusBar().showMessage(f"任务{STATE_LABELS.get(state, state)} · 详情见任务记录")
         if state == "success" and callback:
@@ -1502,28 +979,53 @@ class MainWindow(QMainWindow):
         return dialog.password.text(), dialog.remember.isChecked()
 
     def resolve_password(self, resource: Resource, supplied: str, remember: bool = False) -> str:
-        password = supplied or self.service.common_password or self.service.secrets.get(resource.id + ":backup")
+        password = supplied or self.service.common_password or self.service.secrets.get("common:backup") or self.service.secrets.get(resource.id + ":backup")
         if not password:
             raise UserError("请在设置中输入统一备份密码，或输入这份旧备份原来的密码。")
         if remember:
+            self.service.secrets.save("common:backup", password)
             self.service.common_password = password
         return password
 
     def refresh_common_password(self) -> None:
+        password = self.service.common_password
+        if not password:
+            try:
+                password = self.service.secrets.get("common:backup") or ""
+            except UserError:
+                password = ""
+        if hasattr(self, "common_password_view"):
+            self.common_password_view.setText(password)
+            self.common_password_view.setEchoMode(QLineEdit.EchoMode.Normal if self.common_password_reveal.isChecked() else QLineEdit.EchoMode.Password)
+            self.common_password_reveal.setEnabled(bool(password))
+            self.common_password_reveal.setText("隐藏" if self.common_password_reveal.isChecked() else "显示")
         if hasattr(self, "common_password_status"):
-            self.common_password_status.setText("已输入 · 本次打开期间，所有新建 .amb 备份共用它" if self.service.common_password else "尚未输入 · 第一次备份时也可以设置")
+            self.common_password_status.setText("已保存 · 所有新建 .amb 备份共用它" if password else "尚未保存统一口令 · 第一次备份时也可以设置")
         if hasattr(self, "settings_status_update"):
             self.settings_status_update()
+
+    def toggle_common_password_visibility(self, visible: bool) -> None:
+        self.common_password_reveal.setText("隐藏" if visible else "显示")
+        self.common_password_view.setEchoMode(QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password)
 
     def set_common_password(self) -> None:
         supplied = self.password_input(True)
         if supplied and supplied[0]:
-            self.service.common_password = supplied[0]
-            self.refresh_common_password()
+            try:
+                self.service.secrets.save("common:backup", supplied[0])
+                self.service.common_password = supplied[0]
+                self.refresh_common_password()
+            except UserError as exc:
+                QMessageBox.warning(self, "口令未保存", str(exc))
 
     def forget_common_password(self) -> None:
-        self.service.common_password = ""
-        self.refresh_common_password()
+        try:
+            self.service.secrets.remove("common:backup")
+            self.service.common_password = ""
+            self.common_password_reveal.setChecked(False)
+            self.refresh_common_password()
+        except UserError as exc:
+            QMessageBox.warning(self, "口令未移除", str(exc))
 
     def refresh_git_token_status(self) -> None:
         if not hasattr(self, "git_token_status"):
@@ -1601,7 +1103,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "未能打开", "请确认这台电脑已安装 Obsidian 并登记了此 Vault。")
             return
         if action == "open":
-            self.open_path(Path(resource.options.get("path") or resource.options.get("home") or next(iter(resource.options.get("record_paths", [])), "")))
+            self.open_path(Path(resource.options.get("path") or resource.options.get("home") or
+                                (Path(resource.options.get("script_path", "")).parent if resource.kind == "script" else next(iter(resource.options.get("record_paths", [])), ""))))
             return
         if action == "records":
             from ..records import list_records
@@ -1661,7 +1164,7 @@ class MainWindow(QMainWindow):
         self.submit(resource, resource.name + " · " + {"start": "启动", "stop": "停止", "restart": "重启", "git_pull": "Git 拉取", "versions": "备份提交"}.get(action, action), lambda context: self.service.action(resource, action, context))
 
     def begin_restore(self, resource: Resource, archive_source: str = "") -> None:
-        if resource.kind in {"project", "vault", "agent"}:
+        if resource.kind in {"project", "folder", "script", "vault", "agent"}:
             self.import_backup(archive_source, resource)
             return
         source, target, supplied = "", "", ("", False)
@@ -1726,7 +1229,7 @@ class MainWindow(QMainWindow):
         def inspected(report):
             checklist.set_step(1, "通过 · 密码可以解锁这份备份")
             checklist.set_step(2, f"通过 · 已校验 {report['file_count']} 个文件")
-            if report["kind"] not in {"project", "vault", "agent"}:
+            if report["kind"] not in {"project", "folder", "script", "vault", "agent"}:
                 QMessageBox.warning(self, "请选择对应恢复入口", "Hermes 原生备份请在 Hermes 页面恢复。")
                 return
             identity = report["resource_id"]
@@ -1813,11 +1316,7 @@ class MainWindow(QMainWindow):
 
     def show_resource_activity(self, resource: Resource) -> None:
         self.navigation.setCurrentRow(self.SAFETY)
-        self.safety_tabs.setCurrentIndex(2)
-        self.activity_tabs.setCurrentIndex(1)
-        self.refresh_tasks()
-        self.task_filter.setCurrentIndex(self.task_filter.findData(resource.id) if resource else 0)
-        self.refresh_tasks()
+        self.safety_page.show_overview(resource)
 
     def task_details(self) -> None:
         row = self.task_table.currentRow()
@@ -1843,75 +1342,32 @@ class MainWindow(QMainWindow):
 
     def update_task_timer(self) -> None:
         if hasattr(self, "timer"):
-            if self.navigation.currentRow() == self.SAFETY and self.safety_tabs.currentIndex() == 2 and self.activity_tabs.currentIndex() == 1 and self.jobs:
-                self.timer.start()
-            else:
-                self.timer.stop()
+            self.timer.stop()
 
     def activity_tab_changed(self, index: int) -> None:
         self.update_task_timer()
         if index == 1 and self.navigation.currentRow() == self.SAFETY:
             self.refresh_tasks()
 
-    def search_current_module(self) -> None:
-        query = self.global_search.text().strip()
-        if not query:
-            return
-        needle = query.casefold()
-        if any(needle in row.get("name", "").casefold() or needle in row.get("id", "").casefold()
-               for row in getattr(self.project_page, "project_rows", [])):
-            self.navigation.setCurrentRow(self.PROJECT)
-            self.project_page.search.setText(query)
-            return
-        match = next((row for row in self.store.resources() if needle in row.name.casefold()), None)
-        if match and match.kind in {"agent", "hermes_local", "hermes_server"}:
-            self.navigation.setCurrentRow(self.AGENT)
-            self.agent_page.search.setText(query)
-            return
-        if hasattr(self, "knowledge_page"):
-            if any(needle in (row["name"] + " " + row["relative"] + " " + " ".join(row["tags"])).casefold()
-                   for row in self.knowledge_page.items):
-                self.show_resource_hub()
-                self.knowledge_page.search.setText(query)
-                return
-        if self.navigation.currentRow() == self.PLAN:
-            self.planning_page.open_record_manager()
-            self.planning_page.records.search.setText(query)
-            return
-        self.navigation.setCurrentRow(self.TODAY)
-        self.search_records()
-
     def page_changed(self, index: int) -> None:
-        for row, icon in enumerate((0, 8, 3, 6, 4, 2, 5, 7)):
+        for row, icon in enumerate((0, 8, 3, 6, 5, 7)):
             self.navigation.item(row).setIcon(nav_icon(icon, "#1769e8" if row == index else "#7890b1"))
         self.update_task_timer()
-        if hasattr(self, "agent_status_timer"):
-            if index == self.TODAY:
-                if not self.agent_status_timer.isActive():
-                    self.agent_status_timer.start()
-            else:
-                self.agent_status_timer.stop()
         if index in (self.TODAY, self.PLAN, self.PROJECT):
             self.import_legacy_tasks()
         if index == self.TODAY and not self.today_page.loaded_once:
             self.today_page.refresh()
         if index == self.TODAY:
             self.today_page.refresh_module_tiles()
-            self.refresh_agent_activity()
         elif index == self.PLAN:
             self.planning_page.refresh()
         elif index == self.PROJECT:
             self.project_page.refresh()
-        elif index == self.AGENT:
-            self.agent_page.refresh()
         elif index == self.LIBRARY:
             if not self.knowledge_page.loading and not self.knowledge_page.loaded_once:
                 self.knowledge_page.refresh()
-        elif index == self.ENVIRONMENT:
-            if not self.environment_page.loaded_once and not self.environment_page.worker:
-                self.environment_page.refresh()
         elif index == self.SAFETY:
-            self.file_tracking_page.refresh()
+            self.safety_page.refresh()
 
     def show_resource_hub(self, tool_mode: bool = False, view: str = "knowledge") -> None:
         self.navigation.setCurrentRow(self.LIBRARY)
@@ -1960,7 +1416,7 @@ class MainWindow(QMainWindow):
             return
         self.backup_rows = []
         for resource in self.store.resources():
-            if resource.kind in {"project", "vault", "agent"}:
+            if resource.kind in {"project", "folder", "script", "vault", "agent"}:
                 self.backup_rows.extend((resource, report) for report in archives.list_archives(self.service.backup_root(), resource.id))
             elif resource.kind == "hermes_local":
                 repo = resource.options.get("backup_repo", "")
@@ -1980,120 +1436,9 @@ class MainWindow(QMainWindow):
                       "Hermes 原生" if report.get("native") else readable_size(report.get("size", 0)), status]
             for column, value in enumerate(values):
                 self.backup_table.setItem(row, column, QTableWidgetItem(value))
-        self.refresh_safety_dashboard()
+        if hasattr(self, "safety_page"):
+            self.safety_page.refresh()
 
-    def refresh_safety_dashboard(self):
-        if not hasattr(self, "safety_overview_values"):
-            return
-        resources = self.store.resources()
-        backup_root = self.service.backup_root()
-        health_rows = [(resource, backup_health(self.store, resource, backup_root)) for resource in resources]
-        good = sum(health.get("state") in {"已校验", "已演练"} for _, health in health_rows)
-        pending = len(health_rows) - good
-        encrypted = [(resource, report) for resource, report in self.backup_rows if not report.get("native")]
-        encrypted_size = sum(max(0, int(report.get("size", 0) or 0)) for _, report in encrypted)
-        values = (
-            (f"{len(resources)} 项", "已登记备份目标"),
-            (f"{good} 个", "最近副本已校验或演练"),
-            (f"{pending} 项", "未备份、过期或待验证"),
-            (f"{len(encrypted)} 个", "已登记资料的 .amb 文件"),
-            (readable_size(encrypted_size), "只统计 .amb；不含 Hermes 原生快照"),
-        )
-        for (value_label, note_label), (value, note) in zip(self.safety_overview_values, values):
-            value_label.setText(value)
-            note_label.setText(note)
-        self.safety_storage_total.setText(readable_size(encrypted_size) + " · 加密副本")
-
-        self.safety_jobs_table.blockSignals(True)
-        self.safety_jobs_table.setRowCount(len(health_rows))
-        selected = self.resource_pages[self.safety_kind.currentIndex()].selected() if self.resource_pages else None
-        selected_row = -1
-        for row, (resource, health) in enumerate(health_rows):
-            if selected and selected.id == resource.id:
-                selected_row = row
-            values = [resource.name, KINDS.get(resource.kind, resource.kind),
-                      readable_time(health.get("created_at") or "尚无备份"), health.get("state", "未检测")]
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                if column == 0:
-                    item.setData(Qt.ItemDataRole.UserRole, resource.id)
-                if column == 3:
-                    item.setForeground(QColor("#27845d" if value in {"已校验", "已演练"} else "#b58136"))
-                self.safety_jobs_table.setItem(row, column, item)
-        if selected_row >= 0:
-            self.safety_jobs_table.selectRow(selected_row)
-        self.safety_jobs_table.blockSignals(False)
-
-        self.safety_recent_list.clear()
-        recent = sorted(self.backup_rows, key=lambda row: str(row[1].get("created_at", "")), reverse=True)[:4]
-        for resource, report in recent:
-            if report.get("native"):
-                status = backup_health(self.store, resource, backup_root)["state"]
-                size = "Hermes 原生快照"
-            else:
-                status = backup_health(self.store, resource, backup_root)["state"]
-                size = readable_size(report.get("size", 0))
-            entry = QListWidgetItem(f"{resource.name}  ·  {readable_time(report.get('created_at', '未知'))}  ·  {size}  ·  {status}")
-            entry.setData(Qt.ItemDataRole.UserRole, resource.id)
-            self.safety_recent_list.addItem(entry)
-        if not recent:
-            self.safety_recent_list.addItem("暂无备份记录。选择一项已登记资料后，可立即创建备份。")
-
-        while self.safety_storage_breakdown.count():
-            item = self.safety_storage_breakdown.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
-        category_sizes = {}
-        labels = {"project": "项目", "vault": "Obsidian Vault", "agent": "工作 Agent"}
-        for resource, report in encrypted:
-            category = labels.get(resource.kind, KINDS.get(resource.kind, resource.kind))
-            category_sizes[category] = category_sizes.get(category, 0) + max(0, int(report.get("size", 0) or 0))
-        colors = ("#3979ff", "#36bda7", "#8a61e8")
-        if encrypted_size:
-            for index, (category, size) in enumerate(sorted(category_sizes.items(), key=lambda item: -item[1])):
-                row = QHBoxLayout()
-                marker = QLabel("●")
-                marker.setStyleSheet("color:" + colors[index % len(colors)])
-                row.addWidget(marker)
-                row.addWidget(QLabel(category), 1)
-                row.addWidget(QLabel(readable_size(size)))
-                self.safety_storage_breakdown.addLayout(row)
-                bar = QProgressBar()
-                bar.setRange(0, 100)
-                bar.setValue(round(size * 100 / encrypted_size))
-                bar.setTextVisible(False)
-                bar.setFixedHeight(7)
-                self.safety_storage_breakdown.addWidget(bar)
-        else:
-            empty = QLabel("还没有可统计的加密副本。")
-            empty.setObjectName("SafetyMetricNote")
-            self.safety_storage_breakdown.addWidget(empty)
-
-        self.safety_health_list.clear()
-        ordered_health = sorted(health_rows, key=lambda row: row[1].get("state") not in {"已校验", "已演练"})
-        for resource, health in ordered_health[:3]:
-            state = health.get("state", "未检测")
-            item = QListWidgetItem(f"{resource.name} · {state}")
-            item.setForeground(QColor("#27845d" if state in {"已校验", "已演练"} else "#b58136"))
-            self.safety_health_list.addItem(item)
-        if not health_rows:
-            self.safety_health_title.setText("尚无登记保护资料")
-            self.safety_health_note.setText("先登记要备份的本地资料或 Agent。")
-            self.safety_health_list.addItem("暂无状态记录")
-        elif pending:
-            self.safety_health_title.setText(f"{pending} 项需要处理")
-            self.safety_health_note.setText("状态依据本机备份校验与演练记录；不会自动连接服务器。")
-        else:
-            self.safety_health_title.setText("登记副本均已验证")
-            self.safety_health_note.setText("所有登记项的最近副本均通过校验或恢复演练。")
-        self.safety_migration_note.setText(
-            f"当前有 {len(encrypted)} 个加密副本，共 {readable_size(encrypted_size)}。复制 .amb 文件到新电脑后可从恢复页导入；备份口令需单独保存。"
-            if encrypted else "从此电脑导入 .amb 备份，或把创建后的加密副本复制到新电脑；备份口令需单独保存。")
 
     def restore_selected_backup(self) -> None:
         row = self.backup_table.currentRow()
@@ -2191,7 +1536,7 @@ class MainWindow(QMainWindow):
         self.submit(None, "检查运行依赖", lambda context: self.service.diagnostics(), show)
 
     def remove_secret(self) -> None:
-        resources = [r for r in self.store.resources() if r.kind in {"project", "vault", "agent"}]
+        resources = [r for r in self.store.resources() if r.kind in {"project", "folder", "script", "vault", "agent"}]
         if not resources:
             QMessageBox.information(self, "尚无资源", "登记项目或 Agent 后可管理对应备份口令。")
             return
@@ -2225,16 +1570,12 @@ class MainWindow(QMainWindow):
                 return
         self.timer.stop()
         self.schedule_timer.stop()
-        self.agent_status_timer.stop()
         self.closed = True
-        if self.agent_status_worker is not None:
-            self.agent_status_worker.cancel.set()
         self.project_page.stop_updates()
         self.today_page.stop_updates()
         self.planning_page.stop_updates()
         self.catalog_page.stop_updates()
-        self.environment_page.stop_updates()
-        self.file_tracking_page.stop_updates()
+        self.safety_page.stop_updates()
         self.service.common_password = ""
         self.service.secrets.lock()
         event.accept()
