@@ -1,5 +1,7 @@
 # v1.0 · Windows 软件包（2026-10-16）
 
+- 已发布至 [GitHub v1.0 Release](https://github.com/Liuxn123/agent-manager/releases/tag/v1.0)，附 Windows ZIP 和 SHA256SUMS-v1.0.txt；上传后核对远端附件大小和 SHA-256 与本地一致，Tag 指向实际构建源码提交。仓库现有可见性保持不变。
+
 - 版本按用户要求统一为 `1.0`，源码构建提交 `3274027637a8ecbaaefe82fcb762df67c13667c3`。
 - 现有 PyInstaller 工具链生成 `AgentManager-1.0-win32-AMD64.zip`，归档内含版本/平台/来源提交 BUILD-INFO、完整程序目录、离线说明和第三方许可；不含运行 data/backups/restored。
 - `scripts/smoke_package.py` 验证压缩包解压后显式空数据启动、默认便携存储启动和整目录移动后启动，三项均成功；截图人工复核显示 `v1.0` 和当前六个工作区入口。

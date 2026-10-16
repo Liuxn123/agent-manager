@@ -1,5 +1,9 @@
 # 小年助手 · v1.0
 
+[下载 Windows 64 位免安装包（约 60 MB）](https://github.com/Liuxn123/agent-manager/releases/download/v1.0/AgentManager-1.0-win32-AMD64.zip) · [1.0 发布说明与校验文件](https://github.com/Liuxn123/agent-manager/releases/tag/v1.0)
+
+完整解压后运行 `AgentManager/AgentManager.exe`，无需安装 Python；请保留整个程序目录。当前提供 Windows 包，具体测试范围与已知限制见发布说明。
+
 **每天开始工作的个人工作台，用来管理今日计划、项目、知识资源和数据备份。**
 
 本仓库维护小年助手的桌面软件源码、使用说明、测试与打包流程。项目资料、知识库、凭据、运行数据库和备份保存在用户本地，不随源码仓库上传。当前版本号为 1.0；版本改动见 [更新记录](docs/RELEASE_NOTES.md)，安装包验证范围见 [验证记录](docs/VALIDATION.md)。
