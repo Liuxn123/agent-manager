@@ -9,6 +9,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from agent_manager import __version__
+
 
 def check_application(root: Path, payload: Path, portable: bool = False) -> None:
     if sys.platform == "win32":
@@ -49,7 +52,7 @@ def check_application(root: Path, payload: Path, portable: bool = False) -> None
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     extension = ".zip" if sys.platform == "win32" else ".tar.gz"
-    package = root / "dist" / f"AgentManager-{sys.platform}-{platform.machine()}{extension}"
+    package = root / "dist" / f"AgentManager-{__version__}-{sys.platform}-{platform.machine()}{extension}"
     with tempfile.TemporaryDirectory(prefix="smoke-extract-", dir=root / "build") as temporary:
         payload = Path(temporary) / "original"
         payload.mkdir()

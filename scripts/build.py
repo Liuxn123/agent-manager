@@ -38,6 +38,7 @@ def main() -> None:
     application = ROOT / "dist" / ("AgentManager.app" if sys.platform == "darwin" else "AgentManager")
     portable_root = application.parent if sys.platform == "darwin" else application
     (portable_root / "portable.json").write_text(json.dumps({"mode": "portable", "schema_version": 1}), encoding="utf-8")
+    shutil.copytree(ROOT / "licenses", portable_root / "licenses", dirs_exist_ok=True)
     # A new staging directory prevents a removed DLL from surviving in a zip
     # produced by a subsequent build.
     with tempfile.TemporaryDirectory(prefix="package-", dir=ROOT / "build") as temporary:
@@ -49,8 +50,12 @@ def main() -> None:
         shutil.copy2(ROOT / "src/agent_manager/assets/docs/USER_GUIDE.md", payload / "使用说明.md")
         shutil.copy2(ROOT / "src/agent_manager/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
         metadata = {"version": __version__, "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version(), "data_mode": "portable"}
+        if shutil.which("git"):
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=10)
+            if revision.returncode == 0:
+                metadata["source_commit"] = revision.stdout.strip()
         (payload / "BUILD-INFO.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        name = ROOT / "dist" / f"AgentManager-{sys.platform}-{platform.machine()}"
+        name = ROOT / "dist" / f"AgentManager-{__version__}-{sys.platform}-{platform.machine()}"
         result = shutil.make_archive(str(name), "zip" if sys.platform == "win32" else "gztar", root_dir=payload)
     print("Package:", result)
 
