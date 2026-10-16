@@ -1,3 +1,11 @@
+# v1.0 · Windows 软件包（2026-10-16）
+
+- 版本按用户要求统一为 `1.0`，源码构建提交 `3274027637a8ecbaaefe82fcb762df67c13667c3`。
+- 现有 PyInstaller 工具链生成 `AgentManager-1.0-win32-AMD64.zip`，归档内含版本/平台/来源提交 BUILD-INFO、完整程序目录、离线说明和第三方许可；不含运行 data/backups/restored。
+- `scripts/smoke_package.py` 验证压缩包解压后显式空数据启动、默认便携存储启动和整目录移动后启动，三项均成功；截图人工复核显示 `v1.0` 和当前六个工作区入口。
+- 两项打包环境测试通过；ZIP 完整性、版本和来源提交检查通过。SHA-256 为 `eb00f821010748e6858a3adf01f54cd6633ad2019310f71ea884c6a4f3c6663e`，本地另有校验文件。
+- Windows 包为解压即用的 64 位便携版，需保留整个程序目录。当前未构建 Linux/macOS 包；此前记录的全量旧测试问题仍待处理，不把本次包启动检查表述为全量回归通过。
+
 # 2026-10-16 · 当前软件源码提交前检查
 
 - 源码和脚本 `python -m compileall -q src scripts` 通过；暂存差异 `git diff --cached --check` 通过。
