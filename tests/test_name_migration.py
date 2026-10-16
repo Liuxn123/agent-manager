@@ -94,6 +94,25 @@ class NameMigrationTests(unittest.TestCase):
         self.assertEqual((new / "user.md").read_bytes(), (backup / "user.md").read_bytes())
         self.assertTrue(result["snapshot_verified"])
 
+    def test_note_reference_migration_preserves_import_identity_and_index(self):
+        from selfManger.knowledge import KnowledgeIndex
+        vault = self.root / "vault"
+        old, new = vault / "Agent工作台", vault / "selfManger"
+        new.mkdir(parents=True)
+        index = KnowledgeIndex(self.store, vault)
+        self.store.set_setting("legacy_task_import_v1", {"daily": str(old), "files": ["today.md"]})
+        task = self.store.add_planned_task({"title": "keep once", "kind": "task"}, "legacy:daily:" + str(old) + ":date:task:hash")
+        with self.store.connect() as db:
+            db.execute("INSERT INTO knowledge_files VALUES (?,?,?,?,?,?,?,?)", (index.root_id, "Agent工作台/note.md", "note", "Agent工作台", "note", 1, 1, 0))
+        result = migration.migrate_workbench_references(self.store.path, old, new, self.root / "refs.sqlite", vault, apply=True)
+        self.assertEqual(result["task_references"], 1)
+        self.assertEqual(result["knowledge_references"], 1)
+        self.assertEqual(self.store.setting("legacy_task_import_v1")["daily"], str(new))
+        self.assertEqual(len(self.store.planned_tasks()), 2)
+        self.assertTrue(any(ref.startswith("legacy:daily:" + str(new)) for ref in self.store.planned_task_source_refs()))
+        with self.store.connect() as db:
+            self.assertEqual(tuple(db.execute("SELECT relative_path,folder FROM knowledge_files").fetchone()), ("selfManger/note.md", "selfManger"))
+
     def test_failure_rolls_back_files_database_and_data_directory(self):
         original = self.rules.read_bytes()
         rename = Path.rename

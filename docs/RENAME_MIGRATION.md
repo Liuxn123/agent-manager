@@ -18,4 +18,10 @@ python scripts/migrate_legacy_data.py --source "$env:LOCALAPPDATA/AgentManager" 
 python scripts/migrate_legacy_data.py --directory-only --source 'D:/workspace/myself/Agent工作台' --destination 'D:/workspace/myself/selfManger' --snapshot 'D:/notes-snapshot' --apply
 ```
 
+随后同步已有知识索引和每日任务导入身份，防止移动目录后重复导入任务（快照参数为新的 SQLite 文件）：
+
+```powershell
+python scripts/migrate_legacy_data.py --references-database "$env:LOCALAPPDATA/selfManger/manager.sqlite3" --knowledge-root 'D:/workspace/myself' --source 'D:/workspace/myself/Agent工作台' --destination 'D:/workspace/myself/selfManger' --snapshot 'D:/references-snapshot.sqlite' --apply
+```
+
 便携包默认使用程序旁的 `data`。要使用已迁移的本机数据，运行 `selfManger.exe --data-dir "$env:LOCALAPPDATA/selfManger"`，或设置 `SELFMANGER_DATA_DIR`；不要同时运行两份程序操作同一数据目录。自定义目录和其他机器需分别核对，不会扫描整台电脑或静默迁移。

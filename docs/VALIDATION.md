@@ -1,6 +1,6 @@
 # v1.0.1 · selfManger 更名（2026-10-16）
 
-- 新包名/版本/入口、仅使用新环境变量和凭据服务、工作台新路径：3 项测试通过。独立迁移工具 4 项测试通过，包括快照、数量保持、冲突停止和失败回滚、文字资料字节保持；无旧包导入别名。
+- 新包名/版本/入口、仅使用新环境变量和凭据服务、工作台新路径：3 项测试通过。独立迁移工具 5 项测试通过，包括快照、数量保持、冲突停止和失败回滚、文字资料字节保持、知识索引及任务导入身份迁移；无旧包导入别名。
 - 分模块隔离回归通过：archives、backup_repository、build、hermes_library、knowledge、knowledge_layout、maintenance、obsidian、portability、project_initialization、project_overview、project_workspaces、safety_layout、services、ui_optimization、workbench。存在符号链接权限及既有条件跳过；不将跳过计为通过。
 - 新入口 `python -m selfManger --smoke-test --data-dir <隔离目录> --screenshot <截图>` 成功；源码/脚本 compileall 和差异检查通过。Windows 包启动及发布核对在构建完成后补记。
 - 全量回归仍未通过。test_performance 的旧流水控件已随旧页面移除，任务页签断言未等待异步同步；test_simplified_manager 仍出现超时。test_ui、test_ui_management、test_workbench_ui 尚未完成逐项适配验证，不能宣称 CI 或跨平台通过。已移除接口的测试原文保存在 tests/history，其他未解决用例仍保留。

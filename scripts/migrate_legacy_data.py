@@ -62,6 +62,51 @@ def migrate_directory(source, destination, snapshot, *, apply=False):
     return {"files": len(records), "snapshot_verified": True, "migrated": True}
 
 
+def migrate_workbench_references(database, source, destination, snapshot, knowledge_root, *, apply=False):
+    """Follow the explicit notes move, including import identities to prevent duplicates."""
+    database, source, destination, snapshot, knowledge_root = map(lambda p: Path(p).absolute(),
+        (database, source, destination, snapshot, knowledge_root))
+    if source.exists() or not destination.is_dir() or snapshot.exists() or not database.is_file():
+        raise RuntimeError("Move notes first; use an existing database and a new snapshot file")
+    old = source.relative_to(knowledge_root).as_posix()
+    new = destination.relative_to(knowledge_root).as_posix()
+    root_id = hashlib.sha256(str(knowledge_root.resolve()).casefold().encode()).hexdigest()
+    old_ref = "legacy:daily:" + str(source) + ":"
+    new_ref = "legacy:daily:" + str(destination) + ":"
+    with closing(sqlite3.connect(database)) as db:
+        before = counts(db)
+        refs = [(identity, value, new_ref + value[len(old_ref):]) for identity, value in
+                db.execute("SELECT id,source_ref FROM planned_tasks WHERE source_ref IS NOT NULL") if value.startswith(old_ref)]
+        files = [(table, rowid, relative, new + relative[len(old):])
+                 for table in ("knowledge_files", "knowledge_metadata")
+                 for rowid, relative in db.execute("SELECT rowid,relative_path FROM " + table + " WHERE root_id=?", (root_id,))
+                 if relative == old or relative.startswith(old + "/")]
+        result = {"task_references": len(refs), "knowledge_references": len(files)}
+        if not apply:
+            return result
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(snapshot)) as copy:
+            db.backup(copy)
+            if counts(copy) != before or copy.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("Reference snapshot verification failed")
+        with db:
+            row = db.execute("SELECT value FROM settings WHERE key='legacy_task_import_v1'").fetchone()
+            if row:
+                marker = json.loads(row[0])
+                updated = transform(marker, source, destination)
+                db.execute("UPDATE settings SET value=? WHERE key='legacy_task_import_v1'", (json.dumps(updated, ensure_ascii=False),))
+            for identity, previous, updated in refs:
+                db.execute("UPDATE planned_tasks SET source_ref=? WHERE id=?", (updated, identity))
+            for table, rowid, previous, updated in files:
+                db.execute("UPDATE " + table + " SET relative_path=? WHERE rowid=?", (updated, rowid))
+                if table == "knowledge_files":
+                    folder = str(Path(updated).parent).replace("\\", "/")
+                    db.execute("UPDATE knowledge_files SET folder=? WHERE rowid=?", (folder, rowid))
+            if counts(db) != before or db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("Reference migration verification failed")
+        return {**result, "snapshot_verified": True}
+
+
 def transform(value, old_root, new_root):
     if isinstance(value, dict):
         return {key: transform(item, old_root, new_root) for key, item in value.items()}
@@ -209,7 +254,15 @@ def main():
     parser.add_argument("--system-credentials", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--directory-only", action="store_true")
+    parser.add_argument("--references-database", type=Path)
+    parser.add_argument("--knowledge-root", type=Path)
     options = parser.parse_args()
+    if options.references_database:
+        if not options.knowledge_root:
+            parser.error("--references-database requires --knowledge-root")
+        print(json.dumps(migrate_workbench_references(options.references_database, options.source, options.destination,
+            options.snapshot, options.knowledge_root, apply=options.apply), ensure_ascii=False))
+        return
     keyring = __import__("keyring") if options.system_credentials else None
     result = (migrate_directory(options.source, options.destination, options.snapshot, apply=options.apply)
               if options.directory_only else migrate(options.source, options.destination, options.snapshot, workspace=options.workspace, keyring=keyring, apply=options.apply))
