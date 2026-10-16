@@ -2,7 +2,10 @@
 
 - 新包名/版本/入口、仅使用新环境变量和凭据服务、工作台新路径：3 项测试通过。独立迁移工具 5 项测试通过，包括快照、数量保持、冲突停止和失败回滚、文字资料字节保持、知识索引及任务导入身份迁移；无旧包导入别名。
 - 分模块隔离回归通过：archives、backup_repository、build、hermes_library、knowledge、knowledge_layout、maintenance、obsidian、portability、project_initialization、project_overview、project_workspaces、safety_layout、services、ui_optimization、workbench。存在符号链接权限及既有条件跳过；不将跳过计为通过。
-- 新入口 `python -m selfManger --smoke-test --data-dir <隔离目录> --screenshot <截图>` 成功；源码/脚本 compileall 和差异检查通过。Windows 包启动及发布核对在构建完成后补记。
+- 最终定向回归 28 项：27 通过，1 项文件符号链接权限跳过。新入口 `python -m selfManger --smoke-test --data-dir <隔离目录> --screenshot <截图>` 成功；源码/脚本 compileall 和差异检查通过。
+- Windows PyInstaller 包基于 `23df70fef0352daae708cb090ebd65eae7a34b43` 构建，`selfManger-1.0.1-win32-AMD64.zip` 为 62,530,512 字节；SHA-256 `28ce7e0661f55909aca58facf7ce38adbe0f3c4114503d79bd941c7af928c055`。ZIP 完整性、1.0.1 版本、构建来源、selfManger.exe 与许可、无运行数据检查通过。
+- 冻结程序解压空数据启动、默认便携启动和整目录移动后启动均通过，数据保持在便携目录；截图人工检查显示 selfManger v1.0.1 与现有六入口。未用包测试替换真实安装。
+- 已发布 [selfManger 1.0.1](https://github.com/Liuxn123/selfManger/releases/tag/v1.0.1)：先草稿上传 ZIP 与 SHA256，再核对远端大小/摘要并发布，最终附件地址复查通过；保留 v1.0。仓库原地重命名，历史与可见性不变。
 - 全量回归仍未通过。test_performance 的旧流水控件已随旧页面移除，任务页签断言未等待异步同步；test_simplified_manager 仍出现超时。test_ui、test_ui_management、test_workbench_ui 尚未完成逐项适配验证，不能宣称 CI 或跨平台通过。已移除接口的测试原文保存在 tests/history，其他未解决用例仍保留。
 - 历史验证记录按当时名称保留，以下旧版本文件名和旧目录并非当前运行时兼容入口。真实用户数据与迁移快照不进入软件 Git 仓库。
 
