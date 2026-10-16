@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_manager import archives
-from agent_manager.domain import Cancelled, Resource, UserError
-from agent_manager.runtime import TaskContext
+from selfManger import archives
+from selfManger.domain import Cancelled, Resource, UserError
+from selfManger.runtime import TaskContext
 
 
 class ArchiveTests(unittest.TestCase):
@@ -112,7 +112,7 @@ class ArchiveTests(unittest.TestCase):
         plan = archives.plan_restore(self.resource, source, target, self.password, self.context)
         archives.apply_restore(plan, self.password, self.context)
         self.assertEqual("untracked", (target / "untracked.txt").read_text())
-        bundle = target / ".agent-manager-history.bundle"
+        bundle = target / ".selfManger-history.bundle"
         clone = self.root / "repo-clone"
         subprocess.run(["git", "clone", str(bundle), str(clone)], check=True, capture_output=True)
         self.assertEqual((self.project / "笔记.md").read_text(encoding="utf-8"), (clone / "笔记.md").read_text(encoding="utf-8"))

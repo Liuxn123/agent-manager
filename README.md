@@ -1,12 +1,14 @@
-# 小年助手 · v1.0
+# selfManger · v1.0.1
 
-[下载 Windows 64 位免安装包（约 60 MB）](https://github.com/Liuxn123/agent-manager/releases/download/v1.0/AgentManager-1.0-win32-AMD64.zip) · [1.0 发布说明与校验文件](https://github.com/Liuxn123/agent-manager/releases/tag/v1.0)
+[下载 Windows 64 位免安装包（约 60 MB）](https://github.com/Liuxn123/selfManger/releases/download/v1.0.1/selfManger-1.0.1-win32-AMD64.zip) · [1.0.1 发布说明与校验文件](https://github.com/Liuxn123/selfManger/releases/tag/v1.0.1)
 
-完整解压后运行 `AgentManager/AgentManager.exe`，无需安装 Python；请保留整个程序目录。当前提供 Windows 包，具体测试范围与已知限制见发布说明。
+完整解压后运行 `selfManger/selfManger.exe`，无需安装 Python；请保留整个程序目录。当前提供 Windows 包，具体测试范围与已知限制见发布说明。
+
+旧版升级请先阅读 [一次性数据迁移](docs/RENAME_MIGRATION.md)。应用只使用新路径和名称；便携包默认独立空数据，使用已迁移本机数据时需指定数据目录。
 
 **每天开始工作的个人工作台，用来管理今日计划、项目、知识资源和数据备份。**
 
-本仓库维护小年助手的桌面软件源码、使用说明、测试与打包流程。项目资料、知识库、凭据、运行数据库和备份保存在用户本地，不随源码仓库上传。当前版本号为 1.0；版本改动见 [更新记录](docs/RELEASE_NOTES.md)，安装包验证范围见 [验证记录](docs/VALIDATION.md)。
+本仓库维护selfManger的桌面软件源码、使用说明、测试与打包流程。项目资料、知识库、凭据、运行数据库和备份保存在用户本地，不随源码仓库上传。当前版本号为 1.0.1；版本改动见 [更新记录](docs/RELEASE_NOTES.md)，安装包验证范围见 [验证记录](docs/VALIDATION.md)。
 
 核心工作区为今日工作台、计划、项目、知识库、数据安全和设置。新建项目采用四步引导，支持通用/自定义模板、开发规范、项目内 Skills 副本和知识资料关联；项目规则、任务与交接保持本地 Markdown。专用 Agent 管理暂缓，现有 Agent 数据保护能力继续由数据安全提供。
 
@@ -32,19 +34,19 @@
 
 ## 开始使用
 
-Windows 便携包完整解压后运行 `AgentManager/AgentManager.exe`。保留整个目录；不要只复制 exe。macOS / Linux 使用对应平台运行包，源码模式也可运行。
+Windows 便携包完整解压后运行 `selfManger/selfManger.exe`。保留整个目录；不要只复制 exe。macOS / Linux 使用对应平台运行包，源码模式也可运行。
 
 ```powershell
-# 在 agent-manager 项目根目录执行
+# 在 selfManger 项目根目录执行
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
 $env:PYTHONPATH = (Join-Path $PWD "src")
-.\.venv\Scripts\python.exe -m agent_manager
+.\.venv\Scripts\python.exe -m selfManger
 ```
 
-macOS / Linux：激活虚拟环境后 `python -m pip install -e . && python -m agent_manager`。Python 需要 3.11+。各平台分别打包，不能拿 Windows exe 在其他系统运行。
+macOS / Linux：激活虚拟环境后 `python -m pip install -e . && python -m selfManger`。Python 需要 3.11+。各平台分别打包，不能拿 Windows exe 在其他系统运行。
 
-Windows 源码启动可双击 `start.cmd`，会直接进入“工作台”；当项目旁已有 AgentManager-Portable 安装时沿用其 data，避免打开另一套空登记。需要隔离开发时显式设置 AGENT_MANAGER_DATA_DIR。命令行启动默认也进入“工作台”，可通过 `--startup-page plan` 进入“计划”。
+Windows 源码启动可双击 `start.cmd`，会直接进入“工作台”；当项目旁已有 selfManger-Portable 安装时沿用其 data，避免打开另一套空登记。需要隔离开发时显式设置 SELFMANGER_DATA_DIR。命令行启动默认也进入“工作台”，可通过 `--startup-page plan` 进入“计划”。
 
 第一次打开：
 
@@ -56,10 +58,10 @@ Windows 源码启动可双击 `start.cmd`，会直接进入“工作台”；当
 
 ## Markdown 与 Obsidian
 
-有工作区时，默认文字资料放在 `myself/Agent工作台/`；没有工作区时放在管家数据目录的 `工作台/`。设置可选择另一个真实文件夹；选择 Obsidian 知识库内的目录即可共用。
+有工作区时，默认文字资料放在 `myself/selfManger/`；没有工作区时放在管家数据目录的 `工作台/`。设置可选择另一个真实文件夹；选择 Obsidian 知识库内的目录即可共用。
 
 ```text
-Agent工作台/
+selfManger/
   每日/2026-10-05.md
   资源/<唯一编号>.md
 ```
@@ -92,8 +94,8 @@ Agent工作台/
 
 ## 文档
 
-- [分模块使用说明](src/agent_manager/assets/docs/USER_GUIDE.md)
-- [恢复范围与限制](src/agent_manager/assets/docs/RESTORE_SCOPE.md)
+- [分模块使用说明](src/selfManger/assets/docs/USER_GUIDE.md)
+- [恢复范围与限制](src/selfManger/assets/docs/RESTORE_SCOPE.md)
 - [架构与数据关系](docs/ARCHITECTURE.md)
 - [路线图](docs/ROADMAP.md)
 - [版本说明](docs/RELEASE_NOTES.md)

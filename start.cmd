@@ -11,7 +11,7 @@ if not exist ".venv\Scripts\pythonw.exe" (
 
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 rem Reuse the existing portable registration when developing beside that installation.
-rem An explicit AGENT_MANAGER_DATA_DIR always takes precedence.
-if not defined AGENT_MANAGER_DATA_DIR if exist "%~dp0..\AgentManager-Portable\portable.json" if exist "%~dp0..\AgentManager-Portable\data\manager.sqlite3" set "AGENT_MANAGER_DATA_DIR=%~dp0..\AgentManager-Portable\data"
-start "" ".venv\Scripts\pythonw.exe" -m agent_manager --startup-page workbench
+rem An explicit SELFMANGER_DATA_DIR always takes precedence.
+if not defined SELFMANGER_DATA_DIR if exist "%~dp0..\selfManger-Portable\portable.json" if exist "%~dp0..\selfManger-Portable\data\manager.sqlite3" set "SELFMANGER_DATA_DIR=%~dp0..\selfManger-Portable\data"
+start "" ".venv\Scripts\pythonw.exe" -m selfManger --startup-page workbench
 exit /b

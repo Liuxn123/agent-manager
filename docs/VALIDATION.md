@@ -1,6 +1,14 @@
+# v1.0.1 · selfManger 更名（2026-10-16）
+
+- 新包名/版本/入口、仅使用新环境变量和凭据服务、工作台新路径：3 项测试通过。独立迁移工具 4 项测试通过，包括快照、数量保持、冲突停止和失败回滚、文字资料字节保持；无旧包导入别名。
+- 分模块隔离回归通过：archives、backup_repository、build、hermes_library、knowledge、knowledge_layout、maintenance、obsidian、portability、project_initialization、project_overview、project_workspaces、safety_layout、services、ui_optimization、workbench。存在符号链接权限及既有条件跳过；不将跳过计为通过。
+- 新入口 `python -m selfManger --smoke-test --data-dir <隔离目录> --screenshot <截图>` 成功；源码/脚本 compileall 和差异检查通过。Windows 包启动及发布核对在构建完成后补记。
+- 全量回归仍未通过。test_performance 的旧流水控件已随旧页面移除，任务页签断言未等待异步同步；test_simplified_manager 仍出现超时。test_ui、test_ui_management、test_workbench_ui 尚未完成逐项适配验证，不能宣称 CI 或跨平台通过。已移除接口的测试原文保存在 tests/history，其他未解决用例仍保留。
+- 历史验证记录按当时名称保留，以下旧版本文件名和旧目录并非当前运行时兼容入口。真实用户数据与迁移快照不进入软件 Git 仓库。
+
 # v1.0 · Windows 软件包（2026-10-16）
 
-- 已发布至 [GitHub v1.0 Release](https://github.com/Liuxn123/agent-manager/releases/tag/v1.0)，附 Windows ZIP 和 SHA256SUMS-v1.0.txt；上传后核对远端附件大小和 SHA-256 与本地一致，Tag 指向实际构建源码提交。仓库现有可见性保持不变。
+- 已发布至 [GitHub v1.0 Release](https://github.com/Liuxn123/selfManger/releases/tag/v1.0)，附 Windows ZIP 和 SHA256SUMS-v1.0.txt；上传后核对远端附件大小和 SHA-256 与本地一致，Tag 指向实际构建源码提交。仓库现有可见性保持不变。
 
 - 版本按用户要求统一为 `1.0`，源码构建提交 `3274027637a8ecbaaefe82fcb762df67c13667c3`。
 - 现有 PyInstaller 工具链生成 `AgentManager-1.0-win32-AMD64.zip`，归档内含版本/平台/来源提交 BUILD-INFO、完整程序目录、离线说明和第三方许可；不含运行 data/backups/restored。
@@ -28,7 +36,7 @@
 - 用户那次失败回执对应 P-2026-006：原目录仍存在、归档目标不存在、6 个文件与 prepared 清单一致、原 Obsidian 联接正常。核对只读，未自动移动真实项目或创建 insurance 接续项目。
 - 本版验证在 Windows 完成；其他平台以对应提交 CI 实际结果为准，未把 v0.7.4 的跨平台结果算作本版验证。
 
-源码 `60f1ada61bf119b187586a94ae26a7bf83de7d52` 已上传私有仓库。对应 [CI](https://github.com/Liuxn123/agent-manager/actions/runs/37458607272) 的四个平台均未开始执行（0 个步骤），GitHub 返回账户付款 / spending limit 限制；这次没有得到新的跨平台测试或构建结果。Windows 本机回归与便携包验证如上。
+源码 `60f1ada61bf119b187586a94ae26a7bf83de7d52` 已上传私有仓库。对应 [CI](https://github.com/Liuxn123/selfManger/actions/runs/37458607272) 的四个平台均未开始执行（0 个步骤），GitHub 返回账户付款 / spending limit 限制；这次没有得到新的跨平台测试或构建结果。Windows 本机回归与便携包验证如上。
 
 ## v0.7.4 · 总体日程
 
@@ -42,7 +50,7 @@
 
 Windows 临时占用重试期间仍逐次检查原文；独立测试确认外部修改绝不被重试覆盖。无界面 UI 测试收集提示并断言没有未预期反馈，避免弹窗等待人工关闭。最终跨平台 CI 结果以对应源码流水线为准。
 
-最终源码 `932a6ef44ed91bc096b76e26e1a05b3cc9b067aa` 的 Windows、Linux、macOS ARM 与 Intel 四项测试、构建、冻结包启动及整目录移动验证均成功：[流水线](https://github.com/Liuxn123/agent-manager/actions/runs/37334947013)。本机原生试用在 Windows 完成；后续验证文档提交不改变运行源码。
+最终源码 `932a6ef44ed91bc096b76e26e1a05b3cc9b067aa` 的 Windows、Linux、macOS ARM 与 Intel 四项测试、构建、冻结包启动及整目录移动验证均成功：[流水线](https://github.com/Liuxn123/selfManger/actions/runs/37334947013)。本机原生试用在 Windows 完成；后续验证文档提交不改变运行源码。
 
 ## v0.7.3 · 日常按钮验收
 
@@ -56,7 +64,7 @@ Windows 临时占用重试期间仍逐次检查原文；独立测试确认外部
 - 项目隔离数据按 1440 / 1280 / 960 像素检查布局。原生点击项目资源、收藏新资源并保存，观察到项目关联自动填写、资源增加；进一步修复保存后仍选中旧资源，并补充实际选中 / 正文显示断言。
 
 
-最终运行源码 `8d5edebc6b08e27d68546bb9e7d473b39c61c43c` 的 Windows、Linux、macOS ARM 与 Intel 四项测试、构建和便携移动验证均成功：[流水线](https://github.com/Liuxn123/agent-manager/actions/runs/37320214652)。本机原生点击试用仅在 Windows 完成。后续验证文档提交不修改运行源码。
+最终运行源码 `8d5edebc6b08e27d68546bb9e7d473b39c61c43c` 的 Windows、Linux、macOS ARM 与 Intel 四项测试、构建和便携移动验证均成功：[流水线](https://github.com/Liuxn123/selfManger/actions/runs/37320214652)。本机原生点击试用仅在 Windows 完成。后续验证文档提交不修改运行源码。
 
 ## v0.7.2 · 项目工作区
 
@@ -70,7 +78,7 @@ Windows 临时占用重试期间仍逐次检查原文；独立测试确认外部
 - 原 projects.json、Markdown、SQLite、加密备份与恢复实现不改格式；个人项目未用于日志写入或归档试验。
 - 更新后实际打开个人便携目录，默认今日；进入现有 E:\\obsidian 工作区，DevPilot / MBVD / 逆语 / 投资研究 / 测试五个未归档项目均可查看。既有任务入口显示为入口，不生成虚构清单；宽屏三栏完整展示六张状态卡片。个人正文只读。
 
-源码 `56b88f8a809201486ecca157ce885125b559d476` 的 Windows、Ubuntu 22.04、macOS ARM 与 Intel 四项 CI 均成功，包含自动化测试、冻结包构建、解压启动和整目录移动验证：[流水线](https://github.com/Liuxn123/agent-manager/actions/runs/37300423663)。本机实际使用只验证 Windows；其他系统的真实日常使用未在本机实测。最后的验证文档提交不改变这份已验证源码。
+源码 `56b88f8a809201486ecca157ce885125b559d476` 的 Windows、Ubuntu 22.04、macOS ARM 与 Intel 四项 CI 均成功，包含自动化测试、冻结包构建、解压启动和整目录移动验证：[流水线](https://github.com/Liuxn123/selfManger/actions/runs/37300423663)。本机实际使用只验证 Windows；其他系统的真实日常使用未在本机实测。最后的验证文档提交不改变这份已验证源码。
 
 ## v0.7.1 · 今日界面
 
@@ -82,7 +90,7 @@ Windows 临时占用重试期间仍逐次检查原文；独立测试确认外部
 - 备份、恢复、加密、迁移及便携业务实现保持原逻辑；每日新增条目仍使用原文件锁 / 编辑冲突保护。
 - 原生窗口试用使用独立数据：添加高优先级任务和时间、勾选完成、检查统计 / 重点同步、双击进入项目并返回今日、专注开始 / 暂停，均成功。
 - 本地冻结包完成解压启动、便携目录启动与整目录移动验证；更新个人便携程序时 9 个已有数据 / 备份 / 配置文件哈希一致，11 项登记保留。
-- 最终源码 `90b83fecca6e8d72f151a5c4f9d202003894d627` 的 Windows、Ubuntu、macOS ARM、macOS Intel 四项测试 / 构建 / 冻结包启动与移动验证均成功：[流水线](https://github.com/Liuxn123/agent-manager/actions/runs/37292875520)。最后的验证文档提交不修改该发布源码。
+- 最终源码 `90b83fecca6e8d72f151a5c4f9d202003894d627` 的 Windows、Ubuntu、macOS ARM、macOS Intel 四项测试 / 构建 / 冻结包启动与移动验证均成功：[流水线](https://github.com/Liuxn123/selfManger/actions/runs/37292875520)。最后的验证文档提交不修改该发布源码。
 
 ## v0.7.0
 
@@ -98,7 +106,7 @@ Windows 临时占用重试期间仍逐次检查原文；独立测试确认外部
 - 本地更新：只复制程序与文档，更新前后 data / backups / restored / portable.json 的 9 个已存在文件哈希一致；SQLite 完整性检查通过，11 项登记保留。正常运行后配置迁移标记和最近使用时间会更新 SQLite。
 - 真实配置：打开现有便携目录，默认今日；从今日进入既有 Obsidian 工作区项目，原 STATUS 可读。个人正文未作为试验输入修改。
 
-跨平台：最终源码提交 `8ca4e2afbd4282c300f5b65df7d34ae3614041eb` 的 Windows、Ubuntu 22.04、macOS ARM、macOS Intel 四项 CI 均成功，包含自动化测试、冻结包构建、解压启动和整目录移动验证。[对应流水线](https://github.com/Liuxn123/agent-manager/actions/runs/37288202422)。Linux / macOS / 其他 Windows 设备的真实日常使用未在本机实测。资源安装 / 已测试标记是人工登记，不代表本版连接了 MCP。阶段总结只提供 Prompt 与人工审阅接口。
+跨平台：最终源码提交 `8ca4e2afbd4282c300f5b65df7d34ae3614041eb` 的 Windows、Ubuntu 22.04、macOS ARM、macOS Intel 四项 CI 均成功，包含自动化测试、冻结包构建、解压启动和整目录移动验证。[对应流水线](https://github.com/Liuxn123/selfManger/actions/runs/37288202422)。Linux / macOS / 其他 Windows 设备的真实日常使用未在本机实测。资源安装 / 已测试标记是人工登记，不代表本版连接了 MCP。阶段总结只提供 Prompt 与人工审阅接口。
 
 最终自动化结果：105 项测试，103 项通过、2 项符号链接权限限制跳过。命令为 `python -m unittest discover -s tests -q`。打包与移目录检查使用 `scripts/build.py`、`scripts/smoke_package.py`。
 

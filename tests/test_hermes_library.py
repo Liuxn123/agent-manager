@@ -7,11 +7,11 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_manager.domain import Resource, UserError
-from agent_manager.hermes_library import list_library, read_item
-from agent_manager.runtime import TaskContext
-from agent_manager.adapters.server import ServerHermesAdapter
-from agent_manager.adapters.server_worker import SERVER_PROGRAM
+from selfManger.domain import Resource, UserError
+from selfManger.hermes_library import list_library, read_item
+from selfManger.runtime import TaskContext
+from selfManger.adapters.server import ServerHermesAdapter
+from selfManger.adapters.server_worker import SERVER_PROGRAM
 
 
 class HermesLibraryTests(unittest.TestCase):

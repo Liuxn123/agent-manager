@@ -9,15 +9,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QDialog, QTextBrowser
-from agent_manager import archives
-from agent_manager.domain import Resource, UserError
-from agent_manager.runtime import TaskContext
-from agent_manager.snapshots import snapshot_file
-from agent_manager.storage import Store
-from agent_manager.token_usage import parse_usage, read_usage
-from agent_manager.ui.projects import ProjectLogView
-from agent_manager.ui.window import MainWindow
-from agent_manager.work_summaries import append_summary
+from selfManger import archives
+from selfManger.domain import Resource, UserError
+from selfManger.runtime import TaskContext
+from selfManger.snapshots import snapshot_file
+from selfManger.storage import Store
+from selfManger.ui.projects import ProjectLogView
+from selfManger.ui.window import MainWindow
+from selfManger.work_summaries import append_summary
 
 
 class SimplifiedManagerTests(unittest.TestCase):
@@ -26,6 +25,12 @@ class SimplifiedManagerTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        credential_patch = patch("selfManger.security.SecretStore.get", return_value=None)
+        credential_patch.start()
+        self.addCleanup(credential_patch.stop)
+        save_patch = patch("selfManger.security.SecretStore.save")
+        save_patch.start()
+        self.addCleanup(save_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
         self.context = TaskContext()
@@ -103,14 +108,14 @@ class SimplifiedManagerTests(unittest.TestCase):
             if database == path.as_uri() + "?mode=ro":
                 raise sqlite3.OperationalError("unable to open database file")
             return connect(database, *args, **kwargs)
-        with patch("agent_manager.snapshots.sqlite3.connect", fail_source):
+        with patch("selfManger.snapshots.sqlite3.connect", fail_source):
             with snapshot_file(path, self.context) as (copy, database):
                 self.assertTrue(database)
                 with closing(connect(copy)) as db:
                     self.assertEqual(db.execute("SELECT id FROM facts").fetchall(), [(42,)])
         # An existing WAL must never be ignored by the standalone fallback.
         path.with_name(path.name + "-wal").write_bytes(b"fixture log")
-        with patch("agent_manager.snapshots.sqlite3.connect", fail_source), self.assertRaisesRegex(UserError, "日志文件"):
+        with patch("selfManger.snapshots.sqlite3.connect", fail_source), self.assertRaisesRegex(UserError, "日志文件"):
             with snapshot_file(path, self.context):
                 pass
 
@@ -128,27 +133,7 @@ class SimplifiedManagerTests(unittest.TestCase):
         self.assertEqual(page.selected().options["home"], "/shared/.hermes")
         window.close()
 
-    def test_token_usage_handles_repeated_and_interleaved_cumulative_snapshots(self):
-        def event(total, last):
-            return json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {
-                "total_token_usage": {"input_tokens": total, "total_tokens": total},
-                "last_token_usage": {"input_tokens": last, "total_tokens": last}}}}).encode()
-        # Main stream 10 -> 15 -> 18; reviewer 4 -> 6. Duplicates charge nothing.
-        data = b"\n".join(event(t, l) for t, l in [(10, 10), (10, 10), (4, 4), (15, 5), (6, 2), (18, 3)])
-        self.assertEqual(parse_usage(data)[-1], 24)
-        self.assertIsNone(parse_usage(b'{"type":"chat","text":"private fixture"}'))
 
-    def test_usage_counts_remain_visible_in_redacted_reports(self):
-        from agent_manager.ui.presentation import readable_report
-        home = self.root / "codex"
-        (home / "sessions").mkdir(parents=True)
-        event = {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}}}}
-        (home / "sessions/rollout-fixture.jsonl").write_text(json.dumps(event) + "\n")
-        resource = Resource("Codex", "agent", {"engine": "Codex", "record_paths": [str(home)], "portable_bundle": True})
-        text = readable_report(read_usage(resource, self.context))
-        self.assertIn("输入数量：12", text)
-        self.assertIn("总计数量：15", text)
-        self.assertNotIn("[已隐藏]", text)
 
     def test_project_logs_show_latest_entry_and_keep_original_available(self):
         browser = QTextBrowser()
@@ -188,7 +173,7 @@ class SimplifiedManagerTests(unittest.TestCase):
         report = archives.create_archive(resource, self.root / "backups", "correct-password", self.context)
         window = MainWindow(Store(self.root / "data"))
         from PySide6.QtTest import QTest
-        with patch.object(window, "password_input", return_value=("wrong-password", False)), patch("agent_manager.ui.window.QMessageBox.warning"):
+        with patch.object(window, "password_input", return_value=("wrong-password", False)), patch("selfManger.ui.window.QMessageBox.warning"):
             window.import_backup(report["archive"])
             for _ in range(500):
                 if not window.jobs:

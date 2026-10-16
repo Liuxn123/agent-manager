@@ -10,17 +10,17 @@ import unittest
 from uuid import uuid4
 from unittest.mock import patch
 
-from agent_manager.domain import UserError
-from agent_manager.project_initialization import BUILTIN_TEMPLATES, validate_template, validate_selection
-from agent_manager.project_workspaces import ProjectWorkspace
-from agent_manager.runtime import TaskContext
-from agent_manager.project_skill_copies import prepare_skill_copies, copy_project_skills
+from selfManger.domain import UserError
+from selfManger.project_initialization import BUILTIN_TEMPLATES, validate_template, validate_selection
+from selfManger.project_workspaces import ProjectWorkspace
+from selfManger.runtime import TaskContext
+from selfManger.project_skill_copies import prepare_skill_copies, copy_project_skills
 
 
 class InitializationTests(unittest.TestCase):
     def setUp(self):
-        self.base = Path(os.environ.get("XIAONIAN_TEST_ROOT", tempfile.gettempdir())).resolve()
-        self.fixture = self.base / ("xiaonian-init-test-" + uuid4().hex)
+        self.base = Path(os.environ.get("SELFMANGER_TEST_ROOT", tempfile.gettempdir())).resolve()
+        self.fixture = self.base / ("selfManger-init-test-" + uuid4().hex)
         self.fixture.mkdir()
         self.workspace = ProjectWorkspace(self.fixture / "workspace")
         self.context = TaskContext()
@@ -28,7 +28,7 @@ class InitializationTests(unittest.TestCase):
 
     def tearDown(self):
         target = self.fixture.resolve()
-        if target.parent != self.base or not target.name.startswith("xiaonian-init-test-"):
+        if target.parent != self.base or not target.name.startswith("selfManger-init-test-"):
             raise RuntimeError("Unsafe fixture cleanup target")
         shutil.rmtree(target)
 
@@ -55,29 +55,29 @@ class InitializationTests(unittest.TestCase):
                      "knowledge": [{"name": "knowledge", "path": str(note)}]}
         result = self.workspace.create("样例项目", "交付可核验结果", False, self.context, "sample", selection)
         project = Path(result["directory"])
-        config = json.loads((project / ".xiaonian/config.json").read_text(encoding="utf-8"))
+        config = json.loads((project / ".selfManger/config.json").read_text(encoding="utf-8"))
         rules = (project / "AGENTS.md").read_text(encoding="utf-8")
         self.assertTrue(rules.startswith(original_rules))
         self.assertIn("使用现有环境", rules)
-        self.assertIn(".xiaonian/RESOURCES.md", rules)
+        self.assertIn(".selfManger/RESOURCES.md", rules)
         self.assertEqual(config["project_id"], result["project_id"])
         self.assertEqual(config["skills"][0]["loading"], "manual")
         location = config["skills"][0]["location"]
         self.assertEqual(location["base"], "project")
         copied = project / location["path"]
-        self.assertEqual(location["path"], ".xiaonian/skills/skill-one")
+        self.assertEqual(location["path"], ".selfManger/skills/skill-one")
         self.assertEqual(config["skills"][0]["storage"], "copy")
         self.assertNotEqual(copied.resolve(), skill.resolve())
         self.assertEqual((copied / "SKILL.md").read_bytes(), (skill / "SKILL.md").read_bytes())
         self.assertEqual((copied / "scripts/run.py").read_bytes(), (skill / "scripts/run.py").read_bytes())
         self.assertEqual((copied / "assets/data.bin").read_bytes(), bytes(range(256)))
         self.assertTrue((copied / "empty").is_dir())
-        self.assertIn(".xiaonian/skills/skill-one/SKILL.md", rules)
+        self.assertIn(".selfManger/skills/skill-one/SKILL.md", rules)
         self.assertEqual((skill / "SKILL.md").read_text(encoding="utf-8"), "# existing skill\n")
         self.assertEqual(note.read_text(encoding="utf-8"), "# original knowledge\n")
         self.assertEqual((templates / "AGENTS.md").read_text(encoding="utf-8"), original_rules)
         self.assertIn(result["project_id"], (project / "docs/开发说明.md").read_text(encoding="utf-8"))
-        self.assertFalse((project / ".xiaonian/memory.md").exists())
+        self.assertFalse((project / ".selfManger/memory.md").exists())
         self.assertFalse((project / ".codex").exists())
         self.assertFalse((project / ".claude").exists())
         self.assertTrue((project / "agent/PROMPTS.md").is_file())
@@ -87,7 +87,7 @@ class InitializationTests(unittest.TestCase):
 
     def test_invalid_template_paths_are_rejected_before_number_reservation(self):
         bad_paths = ["../outside.md", "/absolute.md", "C:/outside.md", "agent/STATUS.md",
-                     "AGENTS.md", "README.md", ".xiaonian/config.json", ".git/config", ".claude/skills/x",
+                     "AGENTS.md", "README.md", ".selfManger/config.json", ".git/config", ".claude/skills/x",
                      "nested/.env", "CON.txt", "trailing./file", "a//b", "a/../b", "a/./b"]
         for path in bad_paths:
             with self.subTest(path=path):
@@ -122,7 +122,7 @@ class InitializationTests(unittest.TestCase):
 
     def test_default_creation_and_duplicate_creation_preserve_config(self):
         result = self.workspace.create("default", "goal", False, self.context, "default")
-        path = Path(result["directory"]) / ".xiaonian/config.json"
+        path = Path(result["directory"]) / ".selfManger/config.json"
         original = path.read_bytes()
         with self.assertRaises(UserError):
             self.workspace.create("default", "goal", False, self.context, "default")
@@ -154,9 +154,9 @@ class InitializationTests(unittest.TestCase):
         marker.write_text("user changed", encoding="utf-8")
         with self.assertRaisesRegex(UserError, "发生变化"):
             copy_project_skills(plan, self.workspace, project, self.context)
-        self.assertFalse((project / ".xiaonian").exists())
+        self.assertFalse((project / ".selfManger").exists())
         plan = prepare_skill_copies([{"name": "skill", "path": str(source)}], self.context)
-        destination = project / ".xiaonian/skills/skill"
+        destination = project / ".selfManger/skills/skill"
         destination.mkdir(parents=True)
         (destination / "SKILL.md").write_text("keep existing", encoding="utf-8")
         with self.assertRaises(FileExistsError):
@@ -185,7 +185,7 @@ class InitializationTests(unittest.TestCase):
         source.mkdir()
         marker = source / "SKILL.md"
         marker.write_text("keep source", encoding="utf-8")
-        with patch("agent_manager.project_workspaces.copy_project_skills", side_effect=UserError("copy interrupted")):
+        with patch("selfManger.project_workspaces.copy_project_skills", side_effect=UserError("copy interrupted")):
             with self.assertRaisesRegex(UserError, "interrupted"):
                 self.workspace.create("partial", "goal", False, self.context, "partial", {
                     "skills": [{"name": "skill", "path": str(source)}]})

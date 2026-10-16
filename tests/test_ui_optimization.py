@@ -12,11 +12,11 @@ from unittest.mock import patch
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from agent_manager.storage import Store
-from agent_manager.domain import UserError
-from agent_manager.ui.charts import DistributionChart
-from agent_manager.ui.components import nav_icon, _nav_icon
-from agent_manager.ui.window import MainWindow
+from selfManger.storage import Store
+from selfManger.domain import UserError
+from selfManger.ui.charts import DistributionChart
+from selfManger.ui.components import nav_icon, _nav_icon
+from selfManger.ui.window import MainWindow
 
 
 class UIOptimizationTests(unittest.TestCase):
@@ -25,7 +25,10 @@ class UIOptimizationTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
-        evidence = os.environ.get("AGENT_MANAGER_TEST_ROOT")
+        credential_patch = patch("selfManger.security.SecretStore.get", return_value=None)
+        credential_patch.start()
+        self.addCleanup(credential_patch.stop)
+        evidence = os.environ.get("SELFMANGER_TEST_ROOT")
         if evidence:
             self.root = Path(evidence) / ("ui-test-" + uuid4().hex[:10])
             self.root.mkdir()
@@ -38,7 +41,7 @@ class UIOptimizationTests(unittest.TestCase):
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             self.app.processEvents()
-            if not window.jobs and window.today_page.worker is None and window.agent_status_worker is None:
+            if not window.jobs and window.today_page.worker is None:
                 return
             time.sleep(.005)
         self.fail("Isolated UI did not settle")
@@ -88,7 +91,7 @@ class UIOptimizationTests(unittest.TestCase):
 
     def test_seven_pages_without_obsolete_dashboard_and_live_task_counts(self):
         window = self.make_window()
-        self.assertEqual(window.stack.count(), 7)
+        self.assertEqual(window.stack.count(), 6)
         self.assertIs(window.stack.widget(window.SETTINGS), window.settings_page)
         self.assertFalse(hasattr(window, "health_table"))
         page = window.today_page
@@ -96,10 +99,10 @@ class UIOptimizationTests(unittest.TestCase):
         report["tasks"] = [{"text": "已完成", "line": 1, "done": True},
                            {"text": "待完成", "line": 2, "done": False}]
         page.render_daily(report)
-        self.assertEqual([row[1] for row in page.task_chart.segments], [1, 1])
+        self.assertIn("1/2", page.task_card.title.text())
         page.projects = [{"state": "completed"}, {"state": "paused"}]
         page.render_projects({"errors": [], "watches": []})
-        self.assertEqual([row[1] for row in page.project_chart.segments], [0, 1, 1])
+        self.assertFalse(hasattr(page, "project_chart"))
 
     def test_cards_skip_shell_icons_and_table_still_looks_up_icons(self):
         window = self.make_window()
@@ -126,14 +129,14 @@ class UIOptimizationTests(unittest.TestCase):
                                              "due_date": page.day.isoformat()})
         page.manual_refresh()
         self.until_idle(window)
-        self.assertEqual([row[1] for row in page.task_chart.segments], [0, 1])
+        self.assertIn("0/1", page.task_card.title.text())
         with patch.object(page, "refresh", wraps=page.refresh) as refresh:
             page.tasks.item(0).setCheckState(Qt.CheckState.Checked)
             self.until_idle(window)
             page.enable_tasks()
             self.assertEqual(refresh.call_count, 1)
         self.assertEqual(window.store.planned_task(task["id"])["status"], "done")
-        self.assertEqual([row[1] for row in page.task_chart.segments], [1, 0])
+        self.assertIn("1/1", page.task_card.title.text())
 
     def test_failed_task_save_restores_checkbox_and_summary(self):
         window = self.make_window()
@@ -150,7 +153,7 @@ class UIOptimizationTests(unittest.TestCase):
             warning.assert_called_once()
         self.assertEqual(window.store.planned_task(task["id"])["status"], "planned")
         self.assertEqual(page.tasks.item(0).checkState(), Qt.CheckState.Unchecked)
-        self.assertEqual([row[1] for row in page.task_chart.segments], [0, 1])
+        self.assertIn("0/1", page.task_card.title.text())
 
     def test_bundle_member_search_and_archived_filter_survive_early_filtering(self):
         window = self.make_window()

@@ -11,15 +11,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_manager import archives
-from agent_manager.application import ApplicationService
-from agent_manager.domain import Resource, UserError
-from agent_manager.maintenance import backup_health, is_due
-from agent_manager.security import SecretStore
-from agent_manager.storage import Store, now
-from agent_manager.runtime import TaskContext
-from agent_manager.adapters.server import ssh_command, existing_connection
-from agent_manager.ui.search import search_local
+from selfManger import archives
+from selfManger.application import ApplicationService
+from selfManger.domain import Resource, UserError
+from selfManger.maintenance import backup_health, is_due
+from selfManger.security import SecretStore
+from selfManger.storage import Store, now
+from selfManger.runtime import TaskContext
+from selfManger.adapters.server import ssh_command, existing_connection
+from selfManger.ui.search import search_local
 
 
 class MaintenanceTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class MaintenanceTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.usb = self.root / "usb-A/AgentManager"
+        self.usb = self.root / "usb-A/selfManger"
         self.usb.mkdir(parents=True)
         (self.usb / "portable.json").write_text('{}')
         self.store = Store(self.usb / "data")
@@ -47,7 +47,7 @@ class MaintenanceTests(unittest.TestCase):
         self.store.save_resource(self.resource)
         self.store.set_setting("backup_root", str(self.usb / "backups"))
         self.store.save_evidence(str(self.usb / "backups/example.amb"), {"source": str(local)})
-        other = self.root / "usb-B/AgentManager"
+        other = self.root / "usb-B/selfManger"
         shutil.copytree(self.usb, other)
         moved = Store(other / "data")
         self.assertEqual(Path(moved.resources()[0].options["path"]), (other / "projects/local").resolve())
@@ -55,7 +55,7 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(Path(moved.evidence(str(other / "backups/example.amb"))["source"]), (other / "projects/local").resolve())
 
     def test_portable_paths_normalize_equivalent_directory_spellings(self):
-        from agent_manager.portable import encode_paths, decode_paths
+        from selfManger.portable import encode_paths, decode_paths
         value = str(self.usb / "nested/../projects/local")
         encoded = encode_paths(value, self.usb.resolve())
         self.assertEqual(encoded, "@portable/projects/local")
@@ -67,7 +67,7 @@ class MaintenanceTests(unittest.TestCase):
         vault.save(self.resource.id + ":backup", self.password)
         raw = vault.vault.read_bytes()
         self.assertNotIn(self.password.encode(), raw)
-        moved_root = self.root / "another-computer/AgentManager"
+        moved_root = self.root / "another-computer/selfManger"
         shutil.copytree(self.usb, moved_root)
         moved = SecretStore(moved_root)
         with self.assertRaises(UserError):
@@ -108,7 +108,7 @@ class MaintenanceTests(unittest.TestCase):
         second = self.service.backup(self.resource, self.context, self.password)
         # Make ordering explicit even on a fast filesystem / same-second creation.
         for value, stamp in [(first, "2020-01-01T00:00:00+00:00"), (second, "2021-01-01T00:00:00+00:00")]:
-            sidecar = Path(value["archive"]).with_suffix(".json")
+            sidecar = Path(value["archive"]).with_name("metadata.json")
             metadata = json.loads(sidecar.read_text())
             metadata["created_at"] = stamp
             sidecar.write_text(json.dumps(metadata))

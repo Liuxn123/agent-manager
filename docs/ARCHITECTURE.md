@@ -1,4 +1,4 @@
-# Agent 管家 v0.8.3 架构
+# selfManger v0.8.3 架构
 
 ## Agent 管理模块（暂缓）
 

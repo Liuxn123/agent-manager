@@ -10,16 +10,16 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_manager import __version__
+from selfManger import __version__
 
 
 def check_application(root: Path, payload: Path, portable: bool = False) -> None:
     if sys.platform == "win32":
-        executable = payload / "AgentManager/AgentManager.exe"
+        executable = payload / "selfManger/selfManger.exe"
     elif sys.platform == "darwin":
-        executable = payload / "AgentManager.app/Contents/MacOS/AgentManager"
+        executable = payload / "selfManger.app/Contents/MacOS/selfManger"
     else:
-        executable = payload / "AgentManager/AgentManager"
+        executable = payload / "selfManger/selfManger"
     screenshot = root / "build/smoke.png"
     screenshot.unlink(missing_ok=True)
     command = [str(executable), "--smoke-test", "--screenshot", str(screenshot)]
@@ -44,7 +44,7 @@ def check_application(root: Path, payload: Path, portable: bool = False) -> None
         raise SystemExit("Frozen application startup failed")
     print("Extracted package opened, rendered and exited successfully")
     if portable:
-        portable_root = payload if sys.platform == "darwin" else payload / "AgentManager"
+        portable_root = payload if sys.platform == "darwin" else payload / "selfManger"
         if not (portable_root / "data/manager.sqlite3").is_file():
             raise SystemExit("Portable package wrote its data outside the application folder")
 
@@ -52,7 +52,7 @@ def check_application(root: Path, payload: Path, portable: bool = False) -> None
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     extension = ".zip" if sys.platform == "win32" else ".tar.gz"
-    package = root / "dist" / f"AgentManager-{__version__}-{sys.platform}-{platform.machine()}{extension}"
+    package = root / "dist" / f"selfManger-{__version__}-{sys.platform}-{platform.machine()}{extension}"
     with tempfile.TemporaryDirectory(prefix="smoke-extract-", dir=root / "build") as temporary:
         payload = Path(temporary) / "original"
         payload.mkdir()

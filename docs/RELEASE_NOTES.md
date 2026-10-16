@@ -1,4 +1,12 @@
-# 小年助手更新记录
+# selfManger 更新记录
+
+## v1.0.1
+
+- 软件目录、Python 包与入口、窗口品牌、图标资源、GitHub 仓库、CI 产物和 Windows 包统一更名为 `selfManger`。
+- 本机数据目录与系统凭据服务使用 `selfManger`；环境变量改为 `SELFMANGER_DATA_DIR`，项目初始化配置与 Skills 副本改为 `.selfManger/`，工作台资料默认存放 `myself/selfManger`。
+- 提供独立的一次性迁移工具，迁移前保存并校验快照，保留数据库记录与用户原文；应用不保留旧名称的运行时回退。升级方式见 [迁移说明](RENAME_MIGRATION.md)。
+- 保持原有六页工作台与通用四步项目初始化流程；不重建 Agent 管理系统。历史版本和已生成的加密归档保留。
+- 此版提供 Windows 64 位便携包。针对改名、迁移、初始化和数据保护进行了验证；旧界面/性能测试仍有不匹配与超时，全量回归及其他平台尚未通过，详见 VALIDATION.md。
 
 ## v1.0
 

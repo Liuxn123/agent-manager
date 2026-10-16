@@ -1,4 +1,4 @@
-name: Save verified private release
+name: Save verified release
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: private-agent-manager-release
+  group: selfManger-release
   cancel-in-progress: false
 
 jobs:

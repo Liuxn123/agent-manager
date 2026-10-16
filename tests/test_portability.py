@@ -11,13 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 from contextlib import closing
 
-from agent_manager import archives
-from agent_manager.application import ApplicationService
-from agent_manager.domain import Resource, UserError
-from agent_manager.profiles import discover_record_paths, restored_resource
-from agent_manager.records import list_records, read_record
-from agent_manager.runtime import TaskContext
-from agent_manager.storage import Store
+from selfManger import archives
+from selfManger.application import ApplicationService
+from selfManger.domain import Resource, UserError
+from selfManger.profiles import discover_record_paths, restored_resource
+from selfManger.records import list_records, read_record
+from selfManger.runtime import TaskContext
+from selfManger.storage import Store
 
 
 class PortabilityTests(unittest.TestCase):
@@ -87,12 +87,12 @@ class PortabilityTests(unittest.TestCase):
         git("add", ".")
         git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture")
         (self.project / "成果.md").write_text("未提交成果", encoding="utf-8")
-        with patch("agent_manager.archives.subprocess.run", side_effect=AssertionError("Project Git must not be inspected")):
+        with patch("selfManger.archives.subprocess.run", side_effect=AssertionError("Project Git must not be inspected")):
             source = self.backup()
         target = self.root / "git-restore"
         plan = archives.plan_restore(self.resource, source, target, self.password, self.context)
         archives.apply_restore(plan, self.password, self.context)
-        bundle = target / "project/.agent-manager-history.bundle"
+        bundle = target / "project/.selfManger-history.bundle"
         self.assertFalse(bundle.exists())
         self.assertFalse((target / "project/.git").exists())
         self.assertEqual((target / "project/成果.md").read_text(encoding="utf-8"), "未提交成果")

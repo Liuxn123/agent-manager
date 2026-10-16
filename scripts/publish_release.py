@@ -16,7 +16,7 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'scripts'))
 sys.path.insert(0, str(root / 'src'))
 from github_publish import api, credential
-from agent_manager import __version__
+from selfManger import __version__
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, message, headers, newurl):
@@ -24,7 +24,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def artifact_bytes(token, route):
     request = urllib.request.Request('https://api.github.com' + route,
-        headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json', 'User-Agent': 'agent-manager-release'})
+        headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json', 'User-Agent': 'selfManger-release'})
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
             return response.read()
@@ -41,12 +41,12 @@ def main():
     parser.add_argument('--run-id', type=int, required=True)
     options = parser.parse_args()
     token = credential()
-    route = '/repos/Liuxn123/agent-manager'
+    route = '/repos/Liuxn123/selfManger'
     repo = api(token, route)
-    assert repo['private'] is True
+    assert repo['full_name'] == 'Liuxn123/selfManger'
     run = api(token, route + '/actions/runs/' + str(options.run_id))
     head = run['head_sha']
-    assert run['head_repository']['full_name'] == 'Liuxn123/agent-manager'
+    assert run['head_repository']['full_name'] == 'Liuxn123/selfManger'
     assert run['name'] == 'Desktop CI and packages' and run['head_branch'] == 'main'
     jobs = api(token, route + '/actions/runs/' + str(run['id']) + '/jobs')['jobs']
     print(json.dumps({'run': run['id'], 'commit': head, 'status': run['status'],
@@ -57,7 +57,7 @@ def main():
     assert run['conclusion'] == 'success'
     assert len(jobs) == 4 and all(job['conclusion'] == 'success' for job in jobs)
     artifacts = api(token, route + '/actions/runs/' + str(run['id']) + '/artifacts')['artifacts']
-    assert {artifact['name'] for artifact in artifacts} == {'AgentManager-' + name for name in ['windows-latest', 'ubuntu-22.04', 'macos-15', 'macos-15-intel']}
+    assert {artifact['name'] for artifact in artifacts} == {'selfManger-' + name for name in ['windows-latest', 'ubuntu-22.04', 'macos-15', 'macos-15-intel']}
     directory = root / 'dist/releases'
     directory.mkdir(parents=True, exist_ok=True)
     packages = []
@@ -85,7 +85,7 @@ def main():
     except RuntimeError as error:
         if str(error) != 'GitHub HTTP 404':
             raise
-        release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'Agent 管家 v' + __version__,
+        release = api(token, route + '/releases', {'tag_name': 'v' + __version__, 'target_commitish': head, 'name': 'selfManger v' + __version__,
             'draft': False, 'prerelease': True,
             'body': (root / 'docs/RELEASE_NOTES.md').read_text(encoding='utf-8')})
     base = release['upload_url'].split('{')[0]
@@ -98,14 +98,14 @@ def main():
             continue
         request = urllib.request.Request(base + '?name=' + urllib.parse.quote(package.name), data=payload,
             headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/zip' if package.suffix == '.zip' else ('application/gzip' if package.suffix == '.gz' else 'text/plain'),
-                     'Accept': 'application/vnd.github+json', 'User-Agent': 'agent-manager-release'}, method='POST')
+                     'Accept': 'application/vnd.github+json', 'User-Agent': 'selfManger-release'}, method='POST')
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=60) as response:
             asset = json.load(response)
         assert asset['state'] == 'uploaded' and asset['size'] == len(payload)
         if asset.get('digest'):
             assert asset['digest'] == 'sha256:' + hashlib.sha256(payload).hexdigest()
         print('Uploaded:', package.name)
-    print('Private release:', release['html_url'])
+    print('Release:', release['html_url'])
 
 if __name__ == '__main__':
     main()

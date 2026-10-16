@@ -13,13 +13,13 @@ from PySide6.QtCore import QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from agent_manager.adapters.agents import AgentAdapter
-from agent_manager.domain import Resource
-from agent_manager.process_inventory import process_names
-from agent_manager.project_workspaces import ProjectWorkspace
-from agent_manager.runtime import TaskContext
-from agent_manager.storage import Store
-from agent_manager.ui.window import MainWindow
+from selfManger.adapters.agents import AgentAdapter
+from selfManger.domain import Resource
+from selfManger.process_inventory import process_names
+from selfManger.project_workspaces import ProjectWorkspace
+from selfManger.runtime import TaskContext
+from selfManger.storage import Store
+from selfManger.ui.window import MainWindow
 
 
 class ProcessInventoryTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class ProcessInventoryTests(unittest.TestCase):
         claude = Resource("Claude", "agent", {"engine": "Claude Code"})
         node = Mock()
         node.cmdline.return_value = ["node", r"C:\tools\@anthropic-ai\claude-code\cli.js"]
-        with patch("agent_manager.adapters.agents.process_names", return_value=[(10, "codex.exe"), (11, "node.exe"), (12, "unrelated.exe")]) as inventory, patch("psutil.Process", return_value=node) as process:
+        with patch("selfManger.adapters.agents.process_names", return_value=[(10, "codex.exe"), (11, "node.exe"), (12, "unrelated.exe")]) as inventory, patch("psutil.Process", return_value=node) as process:
             result = AgentAdapter().external_pids_many([codex, claude])
         self.assertEqual(result, {codex.id: [10], claude.id: [11]})
         inventory.assert_called_once()
@@ -44,12 +44,15 @@ class PerformanceUITests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        credential_patch = patch("selfManger.security.SecretStore.get", return_value=None)
+        credential_patch.start()
+        self.addCleanup(credential_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.store = Store(self.root / "data")
         self.window = MainWindow(self.store)
         self.window.show()
-        self.until(lambda: self.window.agent_status_worker is None)
+        self.until(lambda: not self.window.jobs)
 
     def until(self, predicate):
         deadline = time.monotonic() + 5
@@ -62,44 +65,11 @@ class PerformanceUITests(unittest.TestCase):
         self.fail("Background operation did not complete")
 
     def tearDown(self):
-        self.until(lambda: not self.window.jobs and self.window.agent_status_worker is None)
+        self.until(lambda: not self.window.jobs)
         self.window.close()
         self.app.processEvents()
         self.temporary.cleanup()
 
-    def test_slow_status_scan_runs_off_gui_thread_and_does_not_queue_duplicates(self):
-        resource = Resource("Codex", "agent", {"engine": "Codex", "record_paths": [str(self.root)]})
-        self.store.save_resource(resource)
-        adapter = self.window.service.registry.get(resource)
-        self.window.navigation.setCurrentRow(self.window.SAFETY)
-        self.window.safety_tabs.setCurrentIndex(3)
-        self.until(lambda: self.window.agent_status_worker is None)
-        gate, entered = threading.Event(), threading.Event()
-        threads, ticks = [], []
-        def scan(resources, cancel):
-            threads.append(threading.get_ident())
-            entered.set()
-            gate.wait(10)
-            return {resource.id: [123]}
-        timer = QTimer(); timer.setInterval(5); timer.timeout.connect(lambda: ticks.append(1))
-        timer.start()
-        with patch.object(adapter, "external_pids_many", side_effect=scan) as inventory:
-            try:
-                self.window.refresh_agent_activity()
-                worker = self.window.agent_status_worker
-                self.window.refresh_agent_activity()
-                self.assertIs(self.window.agent_status_worker, worker)
-                self.until(entered.is_set)
-                ticks.clear()
-                # macOS offscreen timers may coalesce; prove responsiveness while the
-                # worker remains blocked, without assuming a 5 ms wall-clock cadence.
-                self.until(lambda: len(ticks) > 3)
-                self.assertNotEqual(threads, [threading.get_ident()])
-            finally:
-                gate.set()
-                self.until(lambda: self.window.agent_status_worker is None)
-                timer.stop()
-            inventory.assert_called_once()
 
     def test_idle_history_timer_is_stopped_and_document_reads_do_not_refresh_all_pages(self):
         self.assertFalse(self.window.timer.isActive())

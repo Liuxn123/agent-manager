@@ -12,15 +12,15 @@ from PySide6.QtCore import Qt, QPoint, QDate, QFileSystemWatcher
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QListWidget, QTextEdit, QVBoxLayout, QMessageBox, QCheckBox
 
-from agent_manager.domain import Resource
-from agent_manager.storage import Store
-from agent_manager.runtime import TaskContext
-from agent_manager.project_workspaces import ProjectWorkspace
-from agent_manager.workbench import Daily, Catalog, TYPES, work_root, project_context, summaries
-from agent_manager.planbook import PlanBook
-from agent_manager.ui.window import MainWindow
-from agent_manager.ui.workbench import CatalogDialog
-from agent_manager.ui.agenda import AgendaPanel, MODE_CUSTOM, MODE_MONTH, MODE_WEEK, agenda_period
+from selfManger.domain import Resource
+from selfManger.storage import Store
+from selfManger.runtime import TaskContext
+from selfManger.project_workspaces import ProjectWorkspace
+from selfManger.workbench import Daily, Catalog, TYPES, work_root, project_context, summaries
+from selfManger.planbook import PlanBook
+from selfManger.ui.window import MainWindow
+from selfManger.ui.workbench import CatalogDialog
+from selfManger.ui.agenda import AgendaPanel, MODE_CUSTOM, MODE_MONTH, MODE_WEEK, agenda_period
 
 
 class WorkbenchUITests(unittest.TestCase):
@@ -29,6 +29,9 @@ class WorkbenchUITests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        credential_patch = patch("selfManger.security.SecretStore.get", return_value=None)
+        credential_patch.start()
+        self.addCleanup(credential_patch.stop)
         self.feedback = []
         # Headless CI must report unexpected feedback instead of waiting forever
         # for somebody to dismiss a native modal. Individual dialog tests override this.
@@ -64,7 +67,7 @@ class WorkbenchUITests(unittest.TestCase):
         self.fail("UI operation timed out: " + str([(t["title"], t["state"], t["result"]) for t in self.store.tasks()[:5]]) + " feedback=" + str(self.feedback))
 
     def tearDown(self):
-        self.until(lambda: not self.window.jobs and not self.window.today_page.worker and not self.window.catalog_page.worker and not self.window.agent_status_worker)
+        self.until(lambda: not self.window.jobs and not self.window.today_page.worker and not self.window.catalog_page.worker)
         self.window.close()
         self.window.pool.waitForDone(5000)
         self.app.processEvents()
@@ -97,7 +100,7 @@ class WorkbenchUITests(unittest.TestCase):
                 self.app.processEvents()
                 time.sleep(.05)
         self.until(lambda: "Obsidian 修改任务" in page.tasks.item(0).text())
-        with patch("agent_manager.ui.workbench.QDesktopServices.openUrl", return_value=True) as opened:
+        with patch("selfManger.ui.workbench.QDesktopServices.openUrl", return_value=True) as opened:
             page.open_daily()
             self.assertIn("obsidian://open?", opened.call_args[0][0].toString())
         self.assertNotIn("Obsidian 修改任务", str(self.store.tasks()))
@@ -115,7 +118,7 @@ class WorkbenchUITests(unittest.TestCase):
             listing = dialog.findChildren(QListWidget)[0]
             listing.item(0).setCheckState(Qt.CheckState.Checked)
             return QDialog.DialogCode.Accepted
-        with patch("agent_manager.ui.projects.QDialog.exec", choose):
+        with patch("selfManger.ui.projects.QDialog.exec", choose):
             project_page.edit_stage()
         self.until(lambda: "验证新阶段" in project_page.stage_label.text())
         details = project_context(self.workspace.document(self.project["project_id"], "agent/STATUS.md")["text"])
@@ -124,7 +127,7 @@ class WorkbenchUITests(unittest.TestCase):
             editor = dialog.findChild(QTextEdit)
             editor.setPlainText(editor.toPlainText() + "\n完成内容：已验证 GUI 链路。")
             return QDialog.DialogCode.Accepted
-        with patch("agent_manager.ui.projects.QDialog.exec", write):
+        with patch("selfManger.ui.projects.QDialog.exec", write):
             project_page.write_stage_summary()
         self.until(lambda: "已验证 GUI 链路" in project_page.summary_view.toPlainText())
         self.assertEqual(len(summaries(self.workspace.document(self.project["project_id"], "agent/HANDOFF.md")["text"])), 1)
@@ -145,7 +148,7 @@ class WorkbenchUITests(unittest.TestCase):
         page.overview.toggle.click()
         self.assertEqual(page.overview.stack.currentIndex(), 0)
         self.assertEqual(page.document_version, version)
-        with patch("agent_manager.ui.projects.QDesktopServices.openUrl", return_value=True) as opened:
+        with patch("selfManger.ui.projects.QDesktopServices.openUrl", return_value=True) as opened:
             page.more_actions[page.open_button].trigger()
             self.assertEqual(Path(opened.call_args[0][0].toLocalFile()), Path(self.project["directory"]))
         status_path = Path(self.project["directory"]) / "agent/STATUS.md"
@@ -202,14 +205,6 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertIn("首次备份时创建", self.window.settings_backup_status.text())
         self.assertEqual(Path(self.window.backup_location.toPlainText()), destination.resolve())
 
-    def test_existing_agent_opens_same_safety_registration_and_daily_has_no_backup_controls(self):
-        self.window.navigation.setCurrentRow(self.window.AGENT)
-        self.window.agent_page.refresh(self.agent.id)
-        self.window.agent_page.safety()
-        self.assertEqual(self.window.navigation.currentRow(), self.window.SAFETY)
-        self.assertEqual(self.window.resource_pages[3].selected().id, self.agent.id)
-        self.assertEqual(self.window.safety_tabs.currentIndex(), 0)
-        self.assertFalse(self.window.timer.isActive())
 
     def test_plan_page_has_week_and_month_ranges_and_reuses_daily_markdown(self):
         week = date(2028, 2, 29)
@@ -313,7 +308,7 @@ class WorkbenchUITests(unittest.TestCase):
         before = old.read_bytes()
         destination = self.root / "portable-notes"
         destination.mkdir()
-        with patch("agent_manager.ui.window.QFileDialog.getExistingDirectory", return_value=str(destination)):
+        with patch("selfManger.ui.window.QFileDialog.getExistingDirectory", return_value=str(destination)):
             self.window.change_workbench_location()
         self.until(lambda: not self.window.today_page.worker and not self.window.catalog_page.worker)
         self.assertEqual(work_root(self.store).resolve(), destination.resolve())
@@ -323,7 +318,7 @@ class WorkbenchUITests(unittest.TestCase):
         self.window.navigation.setCurrentRow(self.window.LIBRARY)
         self.until(lambda: self.window.catalog_page.listing.count() == 1)
         from PySide6.QtCore import QUrl
-        with patch("agent_manager.ui.workbench.QDesktopServices.openUrl") as opened, patch("agent_manager.ui.workbench.QMessageBox.information"):
+        with patch("selfManger.ui.workbench.QDesktopServices.openUrl") as opened, patch("selfManger.ui.workbench.QMessageBox.information"):
             self.window.catalog_page.safe_url(QUrl("file:///C:/not-a-website.exe"))
             opened.assert_not_called()
 
@@ -344,15 +339,6 @@ class WorkbenchUITests(unittest.TestCase):
                 self.until(lambda: not self.window.today_page.worker)
                 reopened.assert_not_called()
 
-    def test_manual_agent_without_directory_does_not_open_current_working_folder(self):
-        manual = Resource("未配置的新 Agent", "agent", {})
-        self.store.save_resource(manual)
-        self.window.agent_page.refresh(manual.id)
-        with patch.object(self.window, "open_path") as opened, patch("agent_manager.ui.workbench.QMessageBox.information"):
-            self.window.agent_page.open_agent()
-            self.window.agent_page.directory()
-            opened.assert_not_called()
-        self.assertEqual(len(self.store.resources()), 2)
 
     def test_missing_task_file_keeps_status_logs_and_notes_usable(self):
         tasks = Path(self.project["directory"]) / "agent/TASKS.md"
@@ -389,7 +375,7 @@ class WorkbenchUITests(unittest.TestCase):
             dialog.goal.setPlainText("验证项目能立即找到")
             dialog.entry.setChecked(False)
             return QDialog.DialogCode.Accepted
-        with patch("agent_manager.ui.projects.ProjectDialog.exec", fill), patch("agent_manager.ui.projects.QMessageBox.information"):
+        with patch("selfManger.ui.projects.ProjectDialog.exec", fill), patch("selfManger.ui.projects.QMessageBox.information"):
             page.new_button.click()
             self.until(lambda: page.selected() is not None and page.selected()["name"] == "新初始化项目" and bool(page.status_text))
         self.assertEqual(page.search.text(), "")
@@ -408,7 +394,7 @@ class WorkbenchUITests(unittest.TestCase):
             dialog.findChild(QCheckBox).setChecked(True)
             return QDialog.DialogCode.Accepted
         for resume in (False, True):
-            with patch("agent_manager.ui.projects.QDialog.exec", confirm):
+            with patch("selfManger.ui.projects.QDialog.exec", confirm):
                 page.more_actions[page.move_button].trigger()
                 expected = "projects/" if resume else "archive/"
                 self.until(lambda: page.selected() and page.selected()["path"].startswith(expected) and bool(page.status_text) and not page.move_watchers)
@@ -431,7 +417,7 @@ class WorkbenchUITests(unittest.TestCase):
             return QDialog.DialogCode.Accepted
         def fail_move(*args):
             raise OSError("injected move failure")
-        with patch("agent_manager.ui.projects.QDialog.exec", confirm), patch.object(ProjectWorkspace, "move", fail_move), patch.object(QMessageBox, "warning") as warning:
+        with patch("selfManger.ui.projects.QDialog.exec", confirm), patch.object(ProjectWorkspace, "move", fail_move), patch.object(QMessageBox, "warning") as warning:
             page.move_project()
             self.until(lambda: warning.called and not page.move_watchers and bool(page.status_text))
         self.assertEqual(self.workspace.manifest(source, TaskContext()), original)
@@ -479,7 +465,7 @@ class WorkbenchUITests(unittest.TestCase):
             self.assertIn(str(path), dialog.goal.toPlainText())
             dialog.entry.setChecked(False)
             return QDialog.DialogCode.Accepted
-        with patch("agent_manager.ui.projects.ProjectDialog.exec", fill), patch.object(QMessageBox, "information"):
+        with patch("selfManger.ui.projects.ProjectDialog.exec", fill), patch.object(QMessageBox, "information"):
             page.more_actions[page.move_button].trigger()
             self.until(lambda: page.selected() and page.selected()["name"] == "每日工作-接续" and bool(page.status_text))
         self.assertTrue(page.selected()["id"].startswith("P-"))
@@ -521,38 +507,7 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(self.window.today_page.tasks.item(0).text(), "验证恢复")
         self.assertTrue(self.window.today_page.edit_button.isEnabled())
 
-    def test_failed_folder_open_shows_feedback_and_does_not_record_agent_use(self):
-        self.window.agent_page.refresh(self.agent.id)
-        with patch("agent_manager.ui.window.QDesktopServices.openUrl", return_value=False), patch("agent_manager.ui.window.QMessageBox.warning") as warning:
-            self.window.agent_page.open_agent()
-            warning.assert_called_once()
-        self.assertFalse(self.store.evidence("agent-used:" + self.agent.id))
-        self.store.remove_resource(self.agent.id)
-        self.window.agent_page.refresh()
-        self.assertTrue(all(not action.isEnabled() for action in self.window.agent_page.actions))
 
-    def test_agent_note_save_opens_saved_markdown_in_library_after_location_change(self):
-        location = self.root / "new-notes"
-        self.store.set_setting("workbench_root", str(location))
-        self.window.navigation.setCurrentRow(self.window.AGENT)
-        self.window.agent_page.refresh(self.agent.id)
-        def fill(dialog):
-            dialog.body.setPlainText("Agent 备注保存验证")
-            return QDialog.DialogCode.Accepted
-        with patch.object(CatalogDialog, "exec", fill):
-            self.window.agent_page.notes()
-            self.until(lambda: self.window.navigation.currentRow() == self.window.LIBRARY and self.window.catalog_page.listing.count() == 1)
-        self.assertIn("Agent 备注保存验证", self.window.catalog_page.preview.toPlainText())
-        self.assertEqual(Catalog(location).scan()["items"][0]["metadata"]["agents"], [self.agent.id])
-        self.window.navigation.setCurrentRow(self.window.AGENT)
-        def edit(dialog):
-            self.assertIn("Agent 备注保存验证", dialog.body.toPlainText())
-            dialog.body.setPlainText("Agent 备注更新验证")
-            return QDialog.DialogCode.Accepted
-        with patch.object(CatalogDialog, "exec", edit):
-            self.window.agent_page.notes()
-            self.until(lambda: self.window.navigation.currentRow() == self.window.LIBRARY and "更新验证" in self.window.catalog_page.preview.toPlainText())
-        self.assertEqual(len(Catalog(location).scan()["items"]), 1)
 
     def test_daily_refreshes_even_when_atomic_save_notification_is_missed(self):
         page = self.window.today_page
@@ -570,7 +525,7 @@ class WorkbenchUITests(unittest.TestCase):
         def fill(dialog):
             dialog.title.setText("关键恢复检查")
             return QDialog.DialogCode.Accepted
-        with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
+        with patch("selfManger.ui.workbench.DailyEntryDialog.exec", fill):
             page.add_entry("今日任务")
         self.until(lambda: len(page.report["tasks"]) == 2)
         self.assertIn("关键恢复检查", self.daily.load()["text"])
@@ -582,26 +537,6 @@ class WorkbenchUITests(unittest.TestCase):
         self.assertEqual(page.metrics[0].value.text(), "1 / 2")
         self.assertNotIn("关键恢复检查", str(self.store.tasks()))
 
-    def test_dashboard_matches_prototype_sections_and_recent_agent_opens_detail(self):
-        page = self.window.today_page
-        self.assertEqual([metric.title.text() for metric in page.metrics],
-                         ["今日任务", "进行中项目", "运行中的 Agent", "待处理事项"])
-        self.assertEqual([page.task_views.tabText(index).split(" · ")[0] for index in range(3)],
-                         ["任务", "日程", "Todo"])
-        self.assertEqual(page.schedule_items.item(0).text(), "09:00 开发")
-        self.assertEqual(page.project_card.title.text(), "今日项目动态  (1)")
-
-        page.render_agent_activity([(0, "codex", self.agent, True, "检测到运行进程 · PID 1234")])
-        self.assertEqual(page.metrics[2].value.text(), "1 / 1")
-        self.assertIn("运行中", page.agent_items.item(0).text())
-
-        self.store.save_evidence("project-used:" + self.project["project_id"], {"at": "2026-10-11T09:00:00+08:00"})
-        self.store.save_evidence("agent-used:" + self.agent.id, {"at": "2026-10-11T10:00:00+08:00"})
-        page.render_recent()
-        self.assertEqual(len(page.recent_buttons), 2)
-        next(button for button in page.recent_buttons if button.text().startswith(self.agent.name)).click()
-        self.assertEqual(self.window.navigation.currentRow(), self.window.AGENT)
-        self.assertEqual(self.window.agent_page.selected().id, self.agent.id)
 
     def test_future_entry_date_navigation_and_completion_preserve_today(self):
         page = self.window.today_page
@@ -611,7 +546,7 @@ class WorkbenchUITests(unittest.TestCase):
             dialog.date.setDate(QDate(future.year, future.month, future.day))
             dialog.title.setText("未来验证")
             return QDialog.DialogCode.Accepted
-        with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
+        with patch("selfManger.ui.workbench.DailyEntryDialog.exec", fill):
             page.add_entry("今日任务")
         self.until(lambda: page.report and page.report["day"] == future.isoformat())
         self.assertEqual(self.daily.load()["text"], original)
@@ -666,7 +601,7 @@ class WorkbenchUITests(unittest.TestCase):
                 entry.title.setText("追加未来日程")
                 entry.time.setText("16:00")
                 return QDialog.DialogCode.Accepted
-            with patch("agent_manager.ui.workbench.DailyEntryDialog.exec", fill):
+            with patch("selfManger.ui.workbench.DailyEntryDialog.exec", fill):
                 panel.add("日程")
             self.until(lambda: any(entry["title"] == "16:00 追加未来日程" for entry in panel.rows))
             self.assertIn("保留原计划", planned.load()["text"])

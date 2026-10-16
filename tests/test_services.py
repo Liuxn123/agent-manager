@@ -7,14 +7,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_manager.adapters.agents import AgentAdapter
-from agent_manager.adapters.local import LocalHermesAdapter
-from agent_manager.adapters.server import ssh_command
-from agent_manager.adapters.server_worker import SERVER_PROGRAM
-from agent_manager.domain import Resource, UserError
-from agent_manager.runtime import ResourceLocks, TaskContext, run_process
-from agent_manager.security import redact, safe_result
-from agent_manager.storage import Store
+from selfManger.adapters.agents import AgentAdapter
+from selfManger.adapters.local import LocalHermesAdapter
+from selfManger.adapters.server import ssh_command
+from selfManger.adapters.server_worker import SERVER_PROGRAM
+from selfManger.domain import Resource, UserError
+from selfManger.runtime import ResourceLocks, TaskContext, run_process
+from selfManger.security import redact, safe_result
+from selfManger.storage import Store
 
 
 class ServiceTests(unittest.TestCase):

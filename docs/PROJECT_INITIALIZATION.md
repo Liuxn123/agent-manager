@@ -7,7 +7,7 @@
 | 项目身份、路径、创建、联接、索引 | `project_workspaces.py` 的 `ProjectWorkspace.create`，保留 issued_ids，创建前检查重复，文件独占写入 | 沿用创建事务，在编号分配前校验初始化选择，创建时附加文件 |
 | 管理文档和模板 | 工作区 `agent/templates` 覆盖默认模板；STATUS/TASKS/HANDOFF 和 PROMPTS 已存在 | 保留原机制；选中的开发规范追加到 AGENTS，不覆盖现有模板原文 |
 | 新建界面和提示词 | `ui/projects.py` 的 `ProjectDialog`、`ProjectPromptDialog` | 四步引导：基本信息、开发规范、技能与资料、确认创建；末页显示项目摘要，不展示原始配置 |
-| Skills | `agent_skills.py` 已有 `discover_skills`，登记 Agent 可提供原生目录或 override | 显式发现或用户选择已有目录，完整复制到项目 `.xiaonian/skills`，保留原始技能，不承诺 Agent 自动加载 |
+| Skills | `agent_skills.py` 已有 `discover_skills`，登记 Agent 可提供原生目录或 override | 显式发现或用户选择已有目录，完整复制到项目 `.selfManger/skills`，保留原始技能，不承诺 Agent 自动加载 |
 | 知识资源 | `ui/knowledge.py` 已加载的 `items`、旧资源 Catalog | 复用已有索引元数据供选择，不扫描其他项目或复制知识正文 |
 | 项目动态和任务 | HANDOFF、SQLite 任务与 Markdown 同步已有流程 | 保持原机制；本轮不增加第二套日志或任务库 |
 | Qt 架构 | Python + PySide6（Qt 6） | 沿用现有绑定，不迁移到 PyQt6 |
@@ -15,10 +15,10 @@
 ## 本轮产物
 
 - `AGENTS.md`：保留原有项目规则，追加用户选定的开发规范和资源阅读入口。
-- `.xiaonian/config.json`：版本、项目编号、模板来源、规范文件入口、Skills 副本/来源位置与知识资源引用；不保存凭据或对话。
-- `.xiaonian/skills/<技能目录名>/`：选中的完整技能副本，包含 SKILL.md、脚本、资源与空目录，不执行脚本。
-- `.xiaonian/RESOURCES.md`：可直接阅读的技能副本和资料引用清单、Skills 加载提示和迁移说明；AGENTS 中另有各技能 SKILL.md 的直接链接。
-- 自定义模板显式指定的文本文件；禁止覆盖管理文档、`.xiaonian`、`.git`、Agent 私有配置和凭据目录。
+- `.selfManger/config.json`：版本、项目编号、模板来源、规范文件入口、Skills 副本/来源位置与知识资源引用；不保存凭据或对话。
+- `.selfManger/skills/<技能目录名>/`：选中的完整技能副本，包含 SKILL.md、脚本、资源与空目录，不执行脚本。
+- `.selfManger/RESOURCES.md`：可直接阅读的技能副本和资料引用清单、Skills 加载提示和迁移说明；AGENTS 中另有各技能 SKILL.md 的直接链接。
+- 自定义模板显式指定的文本文件；禁止覆盖管理文档、`.selfManger`、`.git`、Agent 私有配置和凭据目录。
 
 内置只保留通用模板，自定义 JSON 模板仍支持导入和另存。新建过程不调用大模型，不执行脚本、不修改全局 Agent 配置或知识源文件。Skills 完整复制到项目，不依赖原目录继续可用；知识来源和技能来源记录尽可能保存相对路径，不同盘保留绝对路径，迁移时需要人工核对。
 
@@ -46,4 +46,4 @@ Skills 配置中的 `storage: copy` 表示项目内副本，`location` 指向项
 
 ## 后续阶段（本轮不实施）
 
-第二阶段增加 `.xiaonian/memory.md` 的文件查看、编辑和写入冲突保护，通过 AGENTS 提供入口；STATUS 继续作为项目进度真源，记忆引用状态而不另造进度清单。第三阶段再围绕现有概览和动态，展示可核验 Git/任务/操作/会话元数据，并增加手动保存重要信息到记忆的入口；不自动总结对话、不增加向量库或调度系统。
+第二阶段增加 `.selfManger/memory.md` 的文件查看、编辑和写入冲突保护，通过 AGENTS 提供入口；STATUS 继续作为项目进度真源，记忆引用状态而不另造进度清单。第三阶段再围绕现有概览和动态，展示可核验 Git/任务/操作/会话元数据，并增加手动保存重要信息到记忆的入口；不自动总结对话、不增加向量库或调度系统。

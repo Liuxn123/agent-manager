@@ -1,6 +1,6 @@
 import unittest
 
-from agent_manager.ui.project_widgets import sections, task_snapshot, overview_snapshot
+from selfManger.ui.project_widgets import sections, task_snapshot, overview_snapshot
 
 
 class ProjectOverviewTests(unittest.TestCase):

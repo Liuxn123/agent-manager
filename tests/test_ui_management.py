@@ -12,13 +12,13 @@ from unittest.mock import patch
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QDialog
 
-from agent_manager import archives
-from agent_manager.domain import Resource
-from agent_manager.runtime import TaskContext
-from agent_manager.storage import Store
-from agent_manager.ui.dialogs import TransferDialog, PlanDialog
-from agent_manager.ui.theme import setup_theme
-from agent_manager.ui.window import MainWindow
+from selfManger import archives
+from selfManger.domain import Resource
+from selfManger.runtime import TaskContext
+from selfManger.storage import Store
+from selfManger.ui.dialogs import TransferDialog, PlanDialog
+from selfManger.ui.theme import setup_theme
+from selfManger.ui.window import MainWindow
 
 
 class ManagementUITests(unittest.TestCase):
@@ -28,6 +28,9 @@ class ManagementUITests(unittest.TestCase):
         setup_theme(cls.app)
 
     def setUp(self):
+        credential_patch = patch("selfManger.security.SecretStore.get", return_value=None)
+        credential_patch.start()
+        self.addCleanup(credential_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
         self.store = Store(self.root / "data")
@@ -58,7 +61,7 @@ class ManagementUITests(unittest.TestCase):
         (old_root / "existing.amb").write_bytes(b"fixture-existing-backup")
         destination = self.root / "new-backups"
         destination.mkdir()
-        with patch("agent_manager.ui.window.QFileDialog.getExistingDirectory", return_value=str(destination)):
+        with patch("selfManger.ui.window.QFileDialog.getExistingDirectory", return_value=str(destination)):
             self.window.change_backup_location()
         self.assertEqual(self.window.service.backup_root().resolve(), destination.resolve())
         self.assertEqual((old_root / "existing.amb").read_bytes(), b"fixture-existing-backup")
@@ -67,17 +70,6 @@ class ManagementUITests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(self.window.backup_keep.isVisible())
 
-    def test_dashboard_focuses_missing_backups_and_failed_operations(self):
-        resource = Resource("待处理项目", "project", {"path": str(self.root)})
-        self.store.save_resource(resource)
-        self.store.start_task("fixturefailed", resource.id, "恢复预览")
-        self.store.finish_task("fixturefailed", "failed", {"error": "fixture failure"})
-        self.window.refresh_resources()
-        self.assertIn("最近操作失败或中断", self.window.pending_items.item(0).toolTip())
-        self.window.open_dashboard_item(self.window.pending_items.item(0))
-        self.assertEqual(self.window.navigation.currentRow(), self.window.SAFETY)
-        self.assertEqual(self.window.task_rows[0]["resource_id"], resource.id)
-        self.assertNotIn("搜索本地记录", [button.text() for button in self.window.stack.widget(0).findChildren(QPushButton)])
 
     def test_new_computer_restore_gui_pipeline_restores_files_database_and_registration(self):
         project, records = self.root / "source-project", self.root / "source-records"
@@ -99,8 +91,8 @@ class ManagementUITests(unittest.TestCase):
                 field.setText("新项目" if key == "project" else "新记录")
             return QDialog.DialogCode.Accepted
         with patch.object(self.window, "password_input", return_value=(password, False)), patch.object(TransferDialog, "exec", choose), \
-             patch.object(PlanDialog, "exec", return_value=QDialog.DialogCode.Accepted), patch("agent_manager.ui.window.QMessageBox.information") as done, \
-             patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
+             patch.object(PlanDialog, "exec", return_value=QDialog.DialogCode.Accepted), patch("selfManger.ui.window.QMessageBox.information") as done, \
+             patch("selfManger.ui.window.QMessageBox.warning") as warnings:
             self.window.import_backup(backup["archive"])
             self.wait_jobs()
             self.assertFalse(warnings.called, str(self.store.tasks()))

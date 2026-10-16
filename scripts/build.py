@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from agent_manager import __version__
+from selfManger import __version__
 
 
 def build_environment() -> dict[str, str]:
@@ -28,14 +28,14 @@ def build_environment() -> dict[str, str]:
 
 
 def main() -> None:
-    existing = ROOT / "dist/AgentManager"
+    existing = ROOT / "dist/selfManger"
     if (existing / "data/manager.sqlite3").exists() or (existing / "backups").exists():
         raise RuntimeError("Build output contains portable user data; move the whole folder to a separate location before rebuilding.")
     command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--onedir",
-               "--name", "AgentManager", "--paths", str(ROOT / "src"), "--collect-submodules", "keyring.backends", "--collect-data", "agent_manager",
+               "--name", "selfManger", "--paths", str(ROOT / "src"), "--collect-submodules", "keyring.backends", "--collect-data", "selfManger",
                "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build"), str(ROOT / "scripts/desktop_entry.py")]
     subprocess.run(command, cwd=ROOT, env=build_environment(), check=True)
-    application = ROOT / "dist" / ("AgentManager.app" if sys.platform == "darwin" else "AgentManager")
+    application = ROOT / "dist" / ("selfManger.app" if sys.platform == "darwin" else "selfManger")
     portable_root = application.parent if sys.platform == "darwin" else application
     (portable_root / "portable.json").write_text(json.dumps({"mode": "portable", "schema_version": 1}), encoding="utf-8")
     shutil.copytree(ROOT / "licenses", portable_root / "licenses", dirs_exist_ok=True)
@@ -47,15 +47,15 @@ def main() -> None:
         if sys.platform == "darwin":
             shutil.copy2(portable_root / "portable.json", payload / "portable.json")
         shutil.copy2(ROOT / "README.md", payload / "README.md")
-        shutil.copy2(ROOT / "src/agent_manager/assets/docs/USER_GUIDE.md", payload / "使用说明.md")
-        shutil.copy2(ROOT / "src/agent_manager/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
+        shutil.copy2(ROOT / "src/selfManger/assets/docs/USER_GUIDE.md", payload / "使用说明.md")
+        shutil.copy2(ROOT / "src/selfManger/assets/fonts/OFL.txt", payload / "Noto-Font-OFL.txt")
         metadata = {"version": __version__, "platform": sys.platform, "architecture": platform.machine(), "python": platform.python_version(), "data_mode": "portable"}
         if shutil.which("git"):
             revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=10)
             if revision.returncode == 0:
                 metadata["source_commit"] = revision.stdout.strip()
         (payload / "BUILD-INFO.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        name = ROOT / "dist" / f"AgentManager-{__version__}-{sys.platform}-{platform.machine()}"
+        name = ROOT / "dist" / f"selfManger-{__version__}-{sys.platform}-{platform.machine()}"
         result = shutil.make_archive(str(name), "zip" if sys.platform == "win32" else "gztar", root_dir=payload)
     print("Package:", result)
 

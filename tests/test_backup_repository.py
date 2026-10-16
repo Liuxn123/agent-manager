@@ -6,12 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_manager import archives
-from agent_manager.application import ApplicationService
-from agent_manager.backup_repository import initialize
-from agent_manager.domain import Resource, UserError
-from agent_manager.runtime import TaskContext
-from agent_manager.storage import Store
+from selfManger import archives
+from selfManger.application import ApplicationService
+from selfManger.backup_repository import initialize
+from selfManger.domain import Resource, UserError
+from selfManger.runtime import TaskContext
+from selfManger.storage import Store
 
 
 class BackupRepositoryTests(unittest.TestCase):
@@ -66,7 +66,7 @@ class BackupRepositoryTests(unittest.TestCase):
         source.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
         self.assertEqual(self.organize()["skipped"], 1)
         source.write_bytes(original)
-        with patch("agent_manager.backup_repository.MAX_GIT_ARCHIVE", 100):
+        with patch("selfManger.backup_repository.MAX_GIT_ARCHIVE", 100):
             self.assertEqual(self.organize()["skipped"], 1)
         self.store.save_evidence(str(source.resolve()), {})
         self.assertEqual(self.organize()["skipped"], 1)
@@ -122,11 +122,11 @@ class BackupRepositoryTests(unittest.TestCase):
             initialize(linked_repository)
 
     def test_ordinary_project_and_vault_git_are_opt_in(self):
-        from agent_manager.adapters.projects import ProjectAdapter, VaultAdapter
+        from selfManger.adapters.projects import ProjectAdapter, VaultAdapter
         (self.source / ".git").mkdir()
         for kind, adapter in (("project", ProjectAdapter()), ("vault", VaultAdapter())):
             resource = Resource("fixture", kind, {"path": str(self.source)})
-            with patch("agent_manager.adapters.projects.run_process", side_effect=AssertionError("Git must not be inspected")), patch("agent_manager.archives.subprocess.run", side_effect=AssertionError("Git must not be bundled")):
+            with patch("selfManger.adapters.projects.run_process", side_effect=AssertionError("Git must not be inspected")), patch("selfManger.archives.subprocess.run", side_effect=AssertionError("Git must not be bundled")):
                 report = adapter.observe(resource, self.context)
                 self.assertNotIn("git_status", report)
                 self.service.backup(resource, self.context, self.password)

@@ -7,14 +7,14 @@ from unittest.mock import patch
 from datetime import date
 from pathlib import Path
 
-from agent_manager.domain import Resource, UserError
-from agent_manager.storage import Store
-from agent_manager.runtime import TaskContext
-from agent_manager.project_workspaces import ProjectWorkspace
-from agent_manager.workbench import (Daily, Catalog, MarkdownFiles, work_root, migrate_workbench,
+from selfManger.domain import Resource, UserError
+from selfManger.storage import Store
+from selfManger.runtime import TaskContext
+from selfManger.project_workspaces import ProjectWorkspace
+from selfManger.workbench import (Daily, Catalog, MarkdownFiles, work_root, migrate_workbench,
     project_context, set_project_details, append_stage, summaries, stage_template, markdown_uri)
-from agent_manager.workbench import task_details, Agenda
-from agent_manager.planbook import PlanBook, occurs_on
+from selfManger.workbench import task_details, Agenda
+from selfManger.planbook import PlanBook, occurs_on
 
 
 class WorkbenchTests(unittest.TestCase):
@@ -140,7 +140,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(item["metadata"]["project_id"], "P-2026-010")
         with self.assertRaises(UserError):
             book.save("goal", values, "重复目标")
-        from agent_manager.workbench import frontmatter, render_document
+        from selfManger.workbench import frontmatter, render_document
         metadata, body = frontmatter(item["text"])
         metadata["custom"] = "保留用户字段"
         changed = render_document(metadata, body)
@@ -184,7 +184,7 @@ class WorkbenchTests(unittest.TestCase):
             if len(calls) == 1:
                 raise blocked
             return replace(source, target)
-        with patch("agent_manager.workbench.os.replace", side_effect=temporarily_busy), patch("agent_manager.workbench.time.sleep"):
+        with patch("selfManger.workbench.os.replace", side_effect=temporarily_busy), patch("selfManger.workbench.time.sleep"):
             daily.add_entry("日程", "保存成功", original)
         self.assertEqual(len(calls), 2)
         self.assertIn("保留任务", daily.load()["text"])
@@ -198,7 +198,7 @@ class WorkbenchTests(unittest.TestCase):
         blocked = PermissionError("Windows sharing violation")
         blocked.winerror = 32
         external = report["text"] + "\nObsidian 新内容\n"
-        with patch("agent_manager.workbench.os.replace", side_effect=blocked), patch("agent_manager.workbench.time.sleep", side_effect=lambda _: Path(report["path"]).write_text(external, encoding="utf-8")):
+        with patch("selfManger.workbench.os.replace", side_effect=blocked), patch("selfManger.workbench.time.sleep", side_effect=lambda _: Path(report["path"]).write_text(external, encoding="utf-8")):
             with self.assertRaises(UserError):
                 daily.add_entry("日程", "不应覆盖", report["original"])
         self.assertEqual(daily.load()["text"], external)
@@ -243,7 +243,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(len(summaries(handoff)), 1)
         self.assertIn("人工记录", summaries(handoff)[0])
         self.assertFalse(list(Path(project["directory"]).rglob("SUMMARY.md")))
-        workspace.move(workspace.plan_move(identity, False, context), "归档", context)
+        workspace.set_archived(identity, True, context)
         self.assertEqual(project_context(workspace.document(identity, "agent/STATUS.md")["text"])["phase"], "实验探索")
         with self.assertRaises(UserError):
             append_stage(workspace, identity, "实验探索", stage_template("实验探索"), context)

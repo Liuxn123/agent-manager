@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from agent_manager.domain import UserError
-from agent_manager.obsidian import project_uri, index_uri
-from agent_manager.project_workspaces import ProjectWorkspace, field
-from agent_manager.runtime import TaskContext
+from selfManger.domain import UserError
+from selfManger.obsidian import project_uri, index_uri
+from selfManger.project_workspaces import ProjectWorkspace, field
+from selfManger.runtime import TaskContext
 
 
 class ObsidianTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class ObsidianTests(unittest.TestCase):
                 self.workspace.create_note(identity, name, self.context)
         with self.assertRaises(UserError):
             self.workspace.note_document(identity, "笔记/../agent/STATUS.md")
-        self.workspace.move(self.workspace.plan_move(identity, False, self.context), "归档", self.context)
+        self.workspace.set_archived(identity, True, self.context)
         with self.assertRaises(UserError):
             self.workspace.create_note(identity, "不能写归档", self.context)
 
@@ -60,10 +60,12 @@ class ObsidianTests(unittest.TestCase):
         entry = self.workspace.root / self.workspace.project(identity)["vault_entry"]
         (entry / note["relative"]).write_text("# Obsidian 编辑\n外部新内容", encoding="utf-8")
         self.assertIn("外部新内容", self.workspace.note_document(identity, note["relative"])["text"])
-        self.workspace.move(self.workspace.plan_move(identity, False, self.context), "归档", self.context)
-        self.assertIn("外部新内容", (entry / note["relative"]).read_text(encoding="utf-8"))
-        self.assertEqual(parse_qs(urlparse(project_uri(self.workspace, identity, note["relative"])["uri"]).query)["path"], [str(entry / note["relative"])])
-        self.workspace.move(self.workspace.plan_move(identity, True, self.context), "继续", self.context)
+        self.workspace.set_archived(identity, True, self.context)
+        self.assertFalse(entry.exists())
+        self.assertIn("外部新内容", Path(note["path"]).read_text(encoding="utf-8"))
+        with self.assertRaises(UserError):
+            project_uri(self.workspace, identity, note["relative"])
+        self.workspace.set_archived(identity, False, self.context)
         self.assertIn("外部新内容", Path(note["path"]).read_text(encoding="utf-8"))
 
     def test_wrong_entry_and_missing_vault_do_not_open_another_project(self):
@@ -98,7 +100,7 @@ class ObsidianTests(unittest.TestCase):
         index = self.workspace.root / "myself/03-项目/项目总览.md"
         index.write_text(index.read_text(encoding="utf-8") + "\n人工导航保留\n", encoding="utf-8")
         status = Path(project["directory"]) / "agent/STATUS.md"
-        status.write_text(status.read_text(encoding="utf-8").replace("status: candidate", "status: paused"), encoding="utf-8")
+        status.write_text(status.read_text(encoding="utf-8").replace("status: active", "status: paused"), encoding="utf-8")
         self.workspace.refresh_indexes(self.context)
         self.assertIn("| paused |", index.read_text(encoding="utf-8"))
         self.assertIn("人工导航保留", index.read_text(encoding="utf-8"))

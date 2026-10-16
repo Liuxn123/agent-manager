@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from agent_manager.domain import Resource
-from agent_manager.ui.safety import SafetyPage
+from selfManger.domain import Resource
+from selfManger.ui.safety import SafetyPage
 
 
 class SafetyLayoutTests(unittest.TestCase):
@@ -90,9 +90,9 @@ class SafetyLayoutTests(unittest.TestCase):
         self.window.perform.assert_not_called()
 
     def test_filters_and_no_match_clear_detail_actions(self):
-        self.page.state_filter.setCurrentIndex(self.page.state_filter.findData("healthy"))
+        self.page.search.setText(self.hermes.name)
         self.assertEqual(self.page._selected_entry()["resource"].id, self.hermes.id)
-        self.page.state_filter.setCurrentIndex(self.page.state_filter.findData("unbacked"))
+        self.page.search.setText(self.agent.name)
         self.assertEqual(self.page._selected_entry()["resource"].id, self.agent.id)
         self.page.search.setText("no-match")
         self.assertIsNone(self.page._selected_entry())
@@ -101,9 +101,9 @@ class SafetyLayoutTests(unittest.TestCase):
         self.assertEqual(self.page.source_path.text(), "")
 
     def test_external_resource_navigation_clears_filters_and_selects_correct_item(self):
-        self.page.kind_filter.setCurrentIndex(self.page.kind_filter.findData("agent"))
+        self.page.search.setText(self.agent.name)
         self.page.show_overview(self.project)
-        self.assertEqual(self.page.kind_filter.currentData(), "all")
+        self.assertEqual(self.page.search.text(), "")
         self.assertEqual(self.page._selected_entry()["resource"].id, self.project.id)
         self.assertEqual(self.page.views.currentIndex(), 0)
         self.page.show_restore()

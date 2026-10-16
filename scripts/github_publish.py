@@ -33,7 +33,7 @@ def api(token: str, route: str, data=None, method: str | None = None):
     request = urllib.request.Request("https://api.github.com" + route,
         data=json.dumps(data).encode() if data is not None else None,
         headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-                 "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "personal-agent-manager-publisher"}, method=method)
+                 "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "selfManger-publisher"}, method=method)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             content = response.read()
@@ -47,7 +47,7 @@ def main() -> None:
     parser.add_argument("--probe", action="store_true")
     parser.add_argument("--create", action="store_true")
     parser.add_argument("--status", action="store_true")
-    parser.add_argument("--name", default="agent-manager")
+    parser.add_argument("--name", default="selfManger")
     options = parser.parse_args()
     token = credential()
     user = api(token, "/user")["login"]

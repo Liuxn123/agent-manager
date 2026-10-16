@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import test_ui_optimization as fixture
-from agent_manager.ui.knowledge import QUICK_CAPTURE_FOLDER
+from selfManger.ui.knowledge import QUICK_CAPTURE_FOLDER
 
 
 class KnowledgeLayoutTests(unittest.TestCase):

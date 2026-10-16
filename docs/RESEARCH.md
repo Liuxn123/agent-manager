@@ -1,8 +1,8 @@
-# Agent 管家同类工具调研与功能建议
+# selfManger同类工具调研与功能建议
 
 调研日期：2026-10-04，2026-10-05 补充 Skills Manager。以下依据项目官方说明与文档，未安装或实际试用这些产品；项目列出的能力不代表对所有 Agent 的兼容性。初次建议与本次实现范围分别说明。
 
-决策更新：Skills/MCP/提示词页面已按用户选择移除，技能下载、导入和分发交由 Skills Manager。Agent 管家保留原有便携目录数据，但不再维护第二套技能库。
+决策更新：Skills/MCP/提示词页面已按用户选择移除，技能下载、导入和分发交由 Skills Manager。selfManger保留原有便携目录数据，但不再维护第二套技能库。
 
 2026-10-15 新决策：Agent 页面改为 AI Agent 控制中心，并通过适配器能力展示具体操作。第一轮仅提供 Skills Manager 启动入口；用户随后明确授权获取 GitHub 源码并迁移部分功能。因此控制中心增加 Agent 原生目录发现，以及用户显式选择后的单项复制分配。不同于上游的 Tauri/Rust 客户端，本项目只移植路径映射和技能发现/分配思路，保持 PySide6 与现有资源/适配器结构；不迁移上游 UI、自动更新或链接分发。MIT 文本保存在 `licenses/skills-manager-MIT.txt`。
 
@@ -18,14 +18,14 @@ Skills Manager 官方仓库 README 描述了集中技能库、按 Agent/项目�
 
 ## 调研了哪些工具
 
-| 工具 | 项目公开说明中的重点 | 对 Agent 管家的启发 |
+| 工具 | 项目公开说明中的重点 | 对 selfManger的启发 |
 | --- | --- | --- |
 | [Agent Deck](https://github.com/asheshgoplani/agent-deck) | 多 Agent 会话分组，运行/等待/空闲/错误状态，搜索，技能与 MCP 管理，远端会话 | 提醒只在需要处理时出现；区分“进程运行”和“任务等待输入” |
 | [Agent Sessions](https://github.com/jazzyalex/agent-sessions) | macOS 本地历史搜索、浏览、支持的 CLI 会话续接、使用量查看 | 从旧记录回到原项目，减少找历史和手动定位的步骤 |
 | [opcode](https://github.com/winfunc/opcode) | Claude Code 项目/会话管理，检查点、差异查看，MCP 配置和项目指令文件 | 恢复前展示变化；管理技能、MCP 和项目说明时先看清差异 |
 | [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) | 同一任务内的多 Agent 分工，以及分开工作区的独立任务 | 对独立任务明确项目、分支和工作区；按你目前习惯，先提供清楚的项目入口 |
 
-Agent Deck 官方文档说明：某些 Agent 的准确任务状态依赖安装对应事件 hook。Agent 管家当前只检测进程，不应因此显示“正在思考”“等待你审批”等没有证据的状态。[来源：Agent Deck 状态检测与集成说明](https://github.com/asheshgoplani/agent-deck#status-detection)
+Agent Deck 官方文档说明：某些 Agent 的准确任务状态依赖安装对应事件 hook。selfManger当前只检测进程，不应因此显示“正在思考”“等待你审批”等没有证据的状态。[来源：Agent Deck 状态检测与集成说明](https://github.com/asheshgoplani/agent-deck#status-detection)
 
 Agent Sessions 的续接只针对支持的原生 CLI 会话。迁移文件、导出上下文、继续原会话是三种不同能力，不应承诺所有 Agent 可以互换完整会话。[来源：Agent Sessions](https://github.com/jazzyalex/agent-sessions#what-it-does)
 

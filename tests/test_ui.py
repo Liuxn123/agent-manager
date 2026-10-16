@@ -15,13 +15,13 @@ from PySide6.QtCore import QThread, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QTextEdit
 
-from agent_manager.domain import KINDS, Resource
-from agent_manager.storage import Store
-from agent_manager.ui.dialogs import ResourceDialog
-from agent_manager.ui.theme import setup_theme
-from agent_manager.ui.window import MainWindow
-from agent_manager.ui.library import HermesLibraryDialog
-from agent_manager.runtime import TaskContext
+from selfManger.domain import KINDS, Resource
+from selfManger.storage import Store
+from selfManger.ui.dialogs import ResourceDialog
+from selfManger.ui.theme import setup_theme
+from selfManger.ui.window import MainWindow
+from selfManger.ui.library import HermesLibraryDialog
+from selfManger.runtime import TaskContext
 
 
 class UITests(unittest.TestCase):
@@ -31,6 +31,9 @@ class UITests(unittest.TestCase):
         setup_theme(cls.app)
 
     def setUp(self):
+        credential_patch = patch("selfManger.security.SecretStore.get", return_value=None)
+        credential_patch.start()
+        self.addCleanup(credential_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.store = Store(self.root / "data")
@@ -147,7 +150,7 @@ class UITests(unittest.TestCase):
         dialog = HermesLibraryDialog(self.window, resource, report)
         dialog.show()
         dialog.table.selectRow(0)
-        with patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
+        with patch("selfManger.ui.window.QMessageBox.warning") as warnings:
             deadline = time.monotonic() + 10
             while "fixture-private-Hermes-message" not in dialog.preview.toPlainText() and time.monotonic() < deadline:
                 QTest.qWait(20)
@@ -157,36 +160,10 @@ class UITests(unittest.TestCase):
         self.assertNotIn("fixture-private-Hermes-message", str(self.store.tasks()))
         dialog.reject()
 
-    def test_agent_repository_button_runs_background_job_and_vault_git_is_explicit(self):
-        repository = self.root / "agent-backups"
-        self.store.set_setting("agent_backup_repository", str(repository))
-        self.window.refresh_agent_repository()
-        self.window.open_backup_history()
-        self.window.resize(960, 660)
-        self.app.processEvents()
-        self.assertIn(str(repository), self.window.agent_repository_label.text())
-        self.assertGreater(self.window.agent_repository_label.width(), 150)
-        with patch("agent_manager.ui.window.QMessageBox.information") as completed, patch("agent_manager.ui.window.QMessageBox.warning") as warnings:
-            self.window.organize_agent_repository()
-            deadline = time.monotonic() + 10
-            while self.window.jobs and time.monotonic() < deadline:
-                QTest.qWait(20)
-                time.sleep(0.005)
-            self.assertFalse(self.window.jobs)
-            self.assertFalse(warnings.called, self.store.tasks()[0]["result"])
-            self.assertEqual(self.store.tasks()[0]["state"], "success")
-            self.assertIn("当前尚无 Agent 备份", completed.call_args[0][2])
-        self.assertTrue((repository / "catalog.json").is_file())
-        dialog = ResourceDialog(self.window, "vault")
-        self.assertFalse(dialog.manage_git.isChecked())
-        dialog.fields["path"].setText(str(self.root))
-        dialog.manage_git.setChecked(True)
-        dialog.save()
-        self.assertTrue(dialog.result_resource.options["manage_git"])
 
     def test_obsidian_external_note_and_atomic_status_edits_refresh_original_documents(self):
-        from agent_manager.project_workspaces import ProjectWorkspace
-        from agent_manager.runtime import TaskContext
+        from selfManger.project_workspaces import ProjectWorkspace
+        from selfManger.runtime import TaskContext
         from urllib.parse import parse_qs, urlparse
         workspace = ProjectWorkspace(self.root / "workspace")
         workspace.initialize(TaskContext())
@@ -210,7 +187,7 @@ class UITests(unittest.TestCase):
         until(lambda: page.note_list.count() == 1 and "实验笔记" in page.note_view.toPlainText())
         page.documents.setCurrentIndex(3)
         until(lambda: page.obsidian_button.isEnabled())
-        with patch("agent_manager.ui.projects.QDesktopServices.openUrl", return_value=True) as opened:
+        with patch("selfManger.ui.projects.QDesktopServices.openUrl", return_value=True) as opened:
             page.obsidian_button.click()
             until(lambda: opened.call_count == 1)
             params = parse_qs(urlparse(opened.call_args[0][0].toString()).query)
@@ -221,7 +198,7 @@ class UITests(unittest.TestCase):
         until(lambda: marker in page.note_view.toPlainText())
         status = Path(project["directory"]) / "agent/STATUS.md"
         replacement = status.with_suffix(".tmp")
-        replacement.write_text(status.read_text(encoding="utf-8").replace("status: candidate", "status: paused"), encoding="utf-8")
+        replacement.write_text(status.read_text(encoding="utf-8").replace("status: active", "status: paused"), encoding="utf-8")
         replacement.replace(status)
         until(lambda: page.rows and page.rows[0]["state"] == "paused")
         self.assertIn(str(status), page.watcher.files())
@@ -235,13 +212,13 @@ class UITests(unittest.TestCase):
             self.assertTrue(page.more_actions[control].isEnabled())
 
     def test_obsidian_archived_notes_are_visible_without_create_or_inline_edit(self):
-        from agent_manager.project_workspaces import ProjectWorkspace
-        from agent_manager.runtime import TaskContext
+        from selfManger.project_workspaces import ProjectWorkspace
+        from selfManger.runtime import TaskContext
         workspace = ProjectWorkspace(self.root / "workspace")
         workspace.initialize(TaskContext())
         project = workspace.create("历史笔记", "保持历史", False, TaskContext())
         workspace.create_note(project["project_id"], "保留笔记", TaskContext())
-        workspace.move(workspace.plan_move(project["project_id"], False, TaskContext()), "归档", TaskContext())
+        workspace.set_archived(project["project_id"], True, TaskContext())
         self.store.set_setting("project_workspace", str(workspace.root))
         self.window.navigation.setCurrentRow(self.window.PROJECT)
         page = self.window.project_page

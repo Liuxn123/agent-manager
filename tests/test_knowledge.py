@@ -11,11 +11,11 @@ from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtGui import QImage, QTextDocument
 from PySide6.QtWidgets import QApplication
 
-from agent_manager.domain import UserError
-from agent_manager.knowledge import KnowledgeIndex
-from agent_manager.storage import Store
-from agent_manager.ui.knowledge import KnowledgePage
-from agent_manager.ui.theme import setup_theme
+from selfManger.domain import UserError
+from selfManger.knowledge import KnowledgeIndex
+from selfManger.storage import Store
+from selfManger.ui.knowledge import KnowledgePage
+from selfManger.ui.theme import setup_theme
 
 
 def isolated_directory(test):
@@ -129,7 +129,7 @@ class KnowledgeBrowserTests(unittest.TestCase):
         self.app.processEvents()
 
     def test_folder_browsing_search_and_clearing_filters(self):
-        self.assertEqual(self.page.file_list.columnCount(), 5)
+        self.assertEqual(self.page.file_list.columnCount(), 4)
         self.assertLessEqual(self.page.type_filter.geometry().right(), self.page.sort_choice.geometry().left())
         self.assertLess(self.page.folder_list.columnWidth(1), self.page.folder_list.columnWidth(0))
         self.page.folder_list.setCurrentItem(self.page.tree_items["docs"])
